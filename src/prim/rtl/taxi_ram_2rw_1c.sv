@@ -74,7 +74,9 @@ always_ff @(posedge clk) begin
             a_rd_data_reg <= mem[a_addr];
         end
     end
+end
 
+always_ff @(posedge clk) begin
     if (b_en) begin
         if (b_wr_en) begin
             if (STRB_EN) begin
