@@ -51,6 +51,8 @@ struct cndm_dev {
 	phys_addr_t hw_regs_phys;
 	void __iomem *hw_addr;
 
+	struct mutex mbox_lock;
+
 	u32 port_count;
 	u32 port_offset;
 	u32 port_stride;

@@ -47,6 +47,8 @@ static int cndm_common_probe(struct cndm_dev *cdev)
 	int ret = 0;
 	int k;
 
+	mutex_init(&cdev->mbox_lock);
+
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0)
 	devlink_register(devlink);
 #else

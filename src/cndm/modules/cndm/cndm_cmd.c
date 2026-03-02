@@ -17,6 +17,8 @@ int cndm_exec_mbox_cmd(struct cndm_dev *cdev, void *cmd, void *rsp)
 	if (!cmd || !rsp)
 		return -EINVAL;
 
+	mutex_lock(&cdev->mbox_lock);
+
 	// write command to mailbox
 	for (k = 0; k < 16; k++) {
 		iowrite32(*((u32 *)(cmd + k*4)), cdev->hw_addr + 0x10000 + k*4);
@@ -38,6 +40,9 @@ int cndm_exec_mbox_cmd(struct cndm_dev *cdev, void *cmd, void *rsp)
 	for (k = 0; k < 16; k++) {
 		*((u32 *)(rsp + k*4)) = ioread32(cdev->hw_addr + 0x10000 + 0x40 + k*4);
 	}
+
+	mutex_unlock(&cdev->mbox_lock);
+
 	return 0;
 }
 
