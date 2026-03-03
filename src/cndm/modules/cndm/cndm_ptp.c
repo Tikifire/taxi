@@ -21,14 +21,14 @@ ktime_t cndm_read_cpl_ts(struct cndm_priv *priv, const struct cndm_cpl *cpl)
 
 	if (unlikely(!priv->ts_valid || (priv->ts_s ^ ts_s) & 0xf0)) {
 		// seconds MSBs do not match, update cached timestamp
-		if (cdev->phc_regs) {
-			priv->ts_s = ioread32(cdev->phc_regs + 0x18);
-			priv->ts_s |= (u64) ioread32(cdev->phc_regs + 0x1C) << 32;
-			priv->ts_valid = 1;
-		}
+		priv->ts_s = ioread32(cdev->hw_addr + 0x0308);
+		priv->ts_s |= (u64) ioread32(cdev->hw_addr + 0x030C) << 32;
+		priv->ts_valid = 1;
 	}
 
 	ts_s |= priv->ts_s & 0xfffffffffffffff0;
+
+	dev_dbg(cdev->dev, "%s: Read timestamp: %lld.%09d", __func__, ts_s, ts_ns);
 
 	return ktime_set(ts_s, ts_ns);
 }
@@ -36,6 +36,8 @@ ktime_t cndm_read_cpl_ts(struct cndm_priv *priv, const struct cndm_cpl *cpl)
 static int cndm_phc_adjfine(struct ptp_clock_info *ptp, long scaled_ppm)
 {
 	struct cndm_dev *cdev = container_of(ptp, struct cndm_dev, ptp_clock_info);
+	struct cndm_cmd_ptp cmd;
+	struct cndm_cmd_ptp rsp;
 
 	bool neg = false;
 	u64 nom_per_fns, adj;
@@ -47,8 +49,7 @@ static int cndm_phc_adjfine(struct ptp_clock_info *ptp, long scaled_ppm)
 		scaled_ppm = -scaled_ppm;
 	}
 
-	nom_per_fns = ioread32(cdev->phc_regs + 0x70);
-	nom_per_fns |= (u64) ioread32(cdev->phc_regs + 0x74) << 32;
+	nom_per_fns = cdev->ptp_nom_period;
 
 	if (nom_per_fns == 0)
 		nom_per_fns = 0x4ULL << 32;
@@ -60,8 +61,11 @@ static int cndm_phc_adjfine(struct ptp_clock_info *ptp, long scaled_ppm)
 	else
 		adj = nom_per_fns + adj;
 
-	iowrite32(adj & 0xffffffff, cdev->phc_regs + 0x78);
-	iowrite32(adj >> 32, cdev->phc_regs + 0x7C);
+	cmd.opcode = CNDM_CMD_OP_PTP;
+	cmd.flags = CNDM_CMD_PTP_FLG_SET_PERIOD;
+	cmd.period = adj;
+
+	cndm_exec_cmd(cdev, &cmd, &rsp);
 
 	dev_dbg(cdev->dev, "%s adj: 0x%llx", __func__, adj);
 
@@ -72,10 +76,12 @@ static int cndm_phc_gettime(struct ptp_clock_info *ptp, struct timespec64 *ts)
 {
 	struct cndm_dev *cdev = container_of(ptp, struct cndm_dev, ptp_clock_info);
 
-	ioread32(cdev->phc_regs + 0x30);
-	ts->tv_nsec = ioread32(cdev->phc_regs + 0x34);
-	ts->tv_sec = ioread32(cdev->phc_regs + 0x38);
-	ts->tv_sec |= (u64) ioread32(cdev->phc_regs + 0x3C) << 32;
+	ioread32(cdev->hw_addr + 0x0320);
+	ts->tv_nsec = ioread32(cdev->hw_addr + 0x0324);
+	ts->tv_sec = ioread32(cdev->hw_addr + 0x0328);
+	ts->tv_sec |= (u64) ioread32(cdev->hw_addr + 0x032C) << 32;
+
+	dev_dbg(cdev->dev, "%s: Get time: %lld.%09ld", __func__, ts->tv_sec, ts->tv_nsec);
 
 	return 0;
 }
@@ -86,11 +92,13 @@ static int cndm_phc_gettimex(struct ptp_clock_info *ptp, struct timespec64 *ts, 
 	struct cndm_dev *cdev = container_of(ptp, struct cndm_dev, ptp_clock_info);
 
 	ptp_read_system_prets(sts);
-	ioread32(cdev->phc_regs + 0x30);
+	ioread32(cdev->hw_addr + 0x0320);
 	ptp_read_system_postts(sts);
-	ts->tv_nsec = ioread32(cdev->phc_regs + 0x34);
-	ts->tv_sec = ioread32(cdev->phc_regs + 0x38);
-	ts->tv_sec |= (u64) ioread32(cdev->phc_regs + 0x3C) << 32;
+	ts->tv_nsec = ioread32(cdev->hw_addr + 0x0324);
+	ts->tv_sec = ioread32(cdev->hw_addr + 0x0328);
+	ts->tv_sec |= (u64) ioread32(cdev->hw_addr + 0x032C) << 32;
+
+	dev_dbg(cdev->dev, "%s: Get time: %lld.%09ld", __func__, ts->tv_sec, ts->tv_nsec);
 
 	return 0;
 }
@@ -99,10 +107,15 @@ static int cndm_phc_gettimex(struct ptp_clock_info *ptp, struct timespec64 *ts, 
 static int cndm_phc_settime(struct ptp_clock_info *ptp, const struct timespec64 *ts)
 {
 	struct cndm_dev *cdev = container_of(ptp, struct cndm_dev, ptp_clock_info);
+	struct cndm_cmd_ptp cmd;
+	struct cndm_cmd_ptp rsp;
 
-	iowrite32(ts->tv_nsec, cdev->phc_regs + 0x54);
-	iowrite32(ts->tv_sec & 0xffffffff, cdev->phc_regs + 0x58);
-	iowrite32(ts->tv_sec >> 32, cdev->phc_regs + 0x5C);
+	cmd.opcode = CNDM_CMD_OP_PTP;
+	cmd.flags = CNDM_CMD_PTP_FLG_SET_TOD;
+	cmd.tod_ns = ts->tv_nsec;
+	cmd.tod_sec = ts->tv_sec;
+
+	cndm_exec_cmd(cdev, &cmd, &rsp);
 
 	return 0;
 }
@@ -111,6 +124,8 @@ static int cndm_phc_adjtime(struct ptp_clock_info *ptp, s64 delta)
 {
 	struct cndm_dev *cdev = container_of(ptp, struct cndm_dev, ptp_clock_info);
 	struct timespec64 ts;
+	struct cndm_cmd_ptp cmd;
+	struct cndm_cmd_ptp rsp;
 
 	dev_dbg(cdev->dev, "%s: delta: %lld", __func__, delta);
 
@@ -121,7 +136,11 @@ static int cndm_phc_adjtime(struct ptp_clock_info *ptp, s64 delta)
 		cndm_phc_settime(ptp, &ts);
 	} else {
 		// for a small delta, perform a precision atomic offset
-		iowrite32(delta & 0xffffffff, cdev->phc_regs + 0x50);
+		cmd.opcode = CNDM_CMD_OP_PTP;
+		cmd.flags = CNDM_CMD_PTP_FLG_OFFSET_TOD;
+		cmd.tod_ns = delta & 0xffffffff;
+
+		cndm_exec_cmd(cdev, &cmd, &rsp);
 	}
 
 	return 0;
@@ -142,18 +161,29 @@ static void cndm_phc_set_from_system_clock(struct ptp_clock_info *ptp)
 
 void cndm_register_phc(struct cndm_dev *cdev)
 {
+	struct cndm_cmd_ptp cmd;
+	struct cndm_cmd_ptp rsp;
+
 	if (cdev->ptp_clock) {
 		dev_warn(cdev->dev, "PTP clock already registered");
 		return;
 	}
 
-	// TODO
-	if (cdev->port_offset == 0x20000) {
+	cmd.opcode = CNDM_CMD_OP_PTP;
+	cmd.flags = 0x00000000;
+	cmd.nom_period = 0;
+
+	cndm_exec_cmd(cdev, &cmd, &rsp);
+
+	if (rsp.nom_period == 0) {
 		dev_info(cdev->dev, "PTP clock not present");
 		return;
 	}
 
-	cdev->phc_regs = cdev->hw_addr + 0x20000; // TODO
+	cdev->ptp_nom_period = rsp.nom_period;
+
+	dev_info(cdev->dev, "PHC nominal period: %lld.%08lld ns (raw 0x%llx)", cdev->ptp_nom_period >> 32,
+		((cdev->ptp_nom_period & 0xffffffff) * 1000000000) / 0x100000000ll, cdev->ptp_nom_period);
 
 	cdev->ptp_clock_info.owner = THIS_MODULE;
 	snprintf(cdev->ptp_clock_info.name, sizeof(cdev->ptp_clock_info.name), "%s_phc", cdev->name);

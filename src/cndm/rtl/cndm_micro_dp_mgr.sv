@@ -18,7 +18,10 @@ Authors:
 module cndm_micro_dp_mgr #
 (
     parameter PORTS = 2,
-    parameter PORT_BASE_ADDR = 0
+    parameter logic PTP_EN = 1'b1,
+    parameter PTP_BASE_ADDR_DP = 0,
+    parameter PORT_BASE_ADDR_DP = 0,
+    parameter PORT_BASE_ADDR_HOST = 0
 )
 (
     input  wire logic    clk,
@@ -45,6 +48,7 @@ typedef enum logic [15:0] {
     CMD_OP_NOP = 16'h0000,
 
     CMD_OP_ACCESS_REG = 16'h0180,
+    CMD_OP_PTP        = 16'h0190,
 
     CMD_OP_CREATE_EQ  = 16'h0200,
     CMD_OP_MODIFY_EQ  = 16'h0201,
@@ -84,6 +88,9 @@ typedef enum logic [4:0] {
     STATE_Q_SET_BASE_H,
     STATE_Q_ENABLE,
     STATE_Q_DISABLE,
+    STATE_PTP_READ_1,
+    STATE_PTP_READ_2,
+    STATE_PTP_SET,
     STATE_SEND_RSP,
     STATE_PAD_RSP
 } state_t;
@@ -135,9 +142,9 @@ assign m_apb_dp_ctrl.pauser = '0;
 assign m_apb_dp_ctrl.pwuser = '0;
 
 logic cmd_frame_reg = 1'b0, cmd_frame_next;
-logic [3:0] cmd_ptr_reg = '0, cmd_ptr_next;
+logic [3:0] cmd_wr_ptr_reg = '0, cmd_wr_ptr_next;
 logic rsp_frame_reg = 1'b0, rsp_frame_next;
-logic [3:0] rsp_ptr_reg = '0, rsp_ptr_next;
+logic [3:0] rsp_rd_ptr_reg = '0, rsp_rd_ptr_next;
 
 logic drop_cmd_reg = 1'b0, drop_cmd_next;
 
@@ -146,7 +153,10 @@ logic [31:0] flags_reg = '0, flags_next;
 logic [15:0] port_reg = '0, port_next;
 logic [23:0] qn_reg = '0, qn_next;
 
-logic [DP_APB_ADDR_W-1:0] block_base_addr_reg = '0, block_base_addr_next;
+logic [3:0] cmd_ptr_reg = '0, cmd_ptr_next;
+logic [DP_APB_ADDR_W-1:0] dp_ptr_reg = '0, dp_ptr_next;
+logic [31:0] host_ptr_reg = '0, host_ptr_next;
+logic [15:0] cnt_reg = '0, cnt_next;
 
 always_comb begin
     state_next = STATE_IDLE;
@@ -165,14 +175,14 @@ always_comb begin
     m_apb_dp_ctrl_pstrb_next = m_apb_dp_ctrl_pstrb_reg;
 
     cmd_ram_wr_data = s_axis_cmd.tdata;
-    cmd_ram_wr_addr = cmd_ptr_reg;
+    cmd_ram_wr_addr = cmd_wr_ptr_reg;
     cmd_ram_wr_en = 1'b0;
     cmd_ram_rd_addr = '0;
 
     cmd_frame_next = cmd_frame_reg;
-    cmd_ptr_next = cmd_ptr_reg;
+    cmd_wr_ptr_next = cmd_wr_ptr_reg;
     rsp_frame_next = rsp_frame_reg;
-    rsp_ptr_next = rsp_ptr_reg;
+    rsp_rd_ptr_next = rsp_rd_ptr_reg;
 
     drop_cmd_next = drop_cmd_reg;
 
@@ -181,14 +191,17 @@ always_comb begin
     port_next = port_reg;
     qn_next = qn_reg;
 
-    block_base_addr_next = block_base_addr_reg;
+    cmd_ptr_next = cmd_ptr_reg;
+    dp_ptr_next = dp_ptr_reg;
+    host_ptr_next = host_ptr_reg;
+    cnt_next = cnt_reg;
 
     if (s_axis_cmd.tready && s_axis_cmd.tvalid) begin
         if (s_axis_cmd.tlast) begin
             cmd_frame_next = 1'b0;
-            cmd_ptr_next = '0;
+            cmd_wr_ptr_next = '0;
         end else begin
-            cmd_ptr_next = cmd_ptr_reg + 1;
+            cmd_wr_ptr_next = cmd_wr_ptr_reg + 1;
             cmd_frame_next = 1'b1;
         end
     end
@@ -198,11 +211,11 @@ always_comb begin
             s_axis_cmd_tready_next = !m_axis_rsp_tvalid_reg && !rsp_frame_reg;
 
             cmd_ram_wr_data = s_axis_cmd.tdata;
-            cmd_ram_wr_addr = cmd_ptr_reg;
+            cmd_ram_wr_addr = cmd_wr_ptr_reg;
             cmd_ram_wr_en = 1'b1;
 
             // save some important fields
-            case (cmd_ptr_reg)
+            case (cmd_wr_ptr_reg)
                 4'd0: opcode_next = s_axis_cmd.tdata[31:16];
                 4'd1: flags_next = s_axis_cmd.tdata;
                 4'd2: port_next = s_axis_cmd.tdata[15:0];
@@ -211,7 +224,7 @@ always_comb begin
             endcase
 
             if (s_axis_cmd.tready && s_axis_cmd.tvalid && !drop_cmd_reg) begin
-                if (s_axis_cmd.tlast || &cmd_ptr_reg) begin
+                if (s_axis_cmd.tlast || &cmd_wr_ptr_reg) begin
                     drop_cmd_next = !s_axis_cmd.tlast;
                     state_next = STATE_START;
                 end else begin
@@ -222,6 +235,11 @@ always_comb begin
             end
         end
         STATE_START: begin
+            cmd_ptr_next = '0;
+            dp_ptr_next = '0;
+            host_ptr_next = '0;
+            cnt_next = '0;
+
             // determine block base address
             case (opcode_reg)
                 CMD_OP_CREATE_EQ,
@@ -230,7 +248,8 @@ always_comb begin
                 CMD_OP_DESTROY_EQ:
                 begin
                     // EQ
-                    block_base_addr_next = DP_APB_ADDR_W'({port_reg, 16'd0} | 'h0000);
+                    dp_ptr_next = DP_APB_ADDR_W'({port_reg, 16'd0} | 'h0000) + DP_APB_ADDR_W'(PORT_BASE_ADDR_DP);
+                    host_ptr_next = 32'({port_reg, 16'd0} | 'h0000) + PORT_BASE_ADDR_HOST;
                 end
                 CMD_OP_CREATE_CQ,
                 CMD_OP_MODIFY_CQ,
@@ -239,9 +258,11 @@ always_comb begin
                 begin
                     // CQ
                     if (qn_reg[0]) begin
-                        block_base_addr_next = DP_APB_ADDR_W'({port_reg, 16'd0} | 'h0300);
+                        dp_ptr_next = DP_APB_ADDR_W'({port_reg, 16'd0} | 'h0300) + DP_APB_ADDR_W'(PORT_BASE_ADDR_DP);
+                        host_ptr_next = 32'({port_reg, 16'd0} | 'h0300) + PORT_BASE_ADDR_HOST;
                     end else begin
-                        block_base_addr_next = DP_APB_ADDR_W'({port_reg, 16'd0} | 'h0400);
+                        dp_ptr_next = DP_APB_ADDR_W'({port_reg, 16'd0} | 'h0400) + DP_APB_ADDR_W'(PORT_BASE_ADDR_DP);
+                        host_ptr_next = 32'({port_reg, 16'd0} | 'h0400) + PORT_BASE_ADDR_HOST;
                     end
                 end
                 CMD_OP_CREATE_SQ,
@@ -250,7 +271,8 @@ always_comb begin
                 CMD_OP_DESTROY_SQ:
                 begin
                     // SQ
-                    block_base_addr_next = DP_APB_ADDR_W'({port_reg, 16'd0} | 'h0100);
+                    dp_ptr_next = DP_APB_ADDR_W'({port_reg, 16'd0} | 'h0100) + DP_APB_ADDR_W'(PORT_BASE_ADDR_DP);
+                    host_ptr_next = 32'({port_reg, 16'd0} | 'h0100) + PORT_BASE_ADDR_HOST;
                 end
                 CMD_OP_CREATE_RQ,
                 CMD_OP_MODIFY_RQ,
@@ -258,7 +280,8 @@ always_comb begin
                 CMD_OP_DESTROY_RQ:
                 begin
                     // RQ
-                    block_base_addr_next = DP_APB_ADDR_W'({port_reg, 16'd0} | 'h0200);
+                    dp_ptr_next = DP_APB_ADDR_W'({port_reg, 16'd0} | 'h0200) + DP_APB_ADDR_W'(PORT_BASE_ADDR_DP);
+                    host_ptr_next = 32'({port_reg, 16'd0} | 'h0200) + PORT_BASE_ADDR_HOST;
                 end
                 default: begin end
             endcase
@@ -275,6 +298,31 @@ always_comb begin
                 CMD_OP_ACCESS_REG: begin
                     // access register
                     state_next = STATE_REG_1;
+                end
+                CMD_OP_PTP: begin
+                    // PTP control
+                    if (PTP_EN) begin
+                        if (flags_reg[15:0] != 0) begin
+                            // update something
+                            cmd_ptr_next = 2;
+                            dp_ptr_next = PTP_BASE_ADDR_DP + 'h50;
+                            cnt_next = '0;
+                            state_next = STATE_PTP_SET;
+                        end else begin
+                            // dump state
+                            cmd_ptr_next = 2;
+                            dp_ptr_next = PTP_BASE_ADDR_DP + 'h30;
+                            cnt_next = '0;
+                            state_next = STATE_PTP_READ_1;
+                        end
+                    end else begin
+                        // PTP not enabled
+                        m_axis_rsp_tdata_next = '0; // TODO
+                        m_axis_rsp_tvalid_next = 1'b1;
+                        m_axis_rsp_tlast_next = 1'b0;
+
+                        state_next = STATE_SEND_RSP;
+                    end
                 end
                 CMD_OP_CREATE_EQ,
                 CMD_OP_CREATE_CQ,
@@ -375,7 +423,7 @@ always_comb begin
         STATE_Q_RESET_1: begin
             // reset queue 1
             if (!m_apb_dp_ctrl_psel_reg) begin
-                m_apb_dp_ctrl_paddr_next = block_base_addr_reg + 'h0000;
+                m_apb_dp_ctrl_paddr_next = dp_ptr_reg + 'h0000;
                 m_apb_dp_ctrl_psel_next = 1'b1;
                 m_apb_dp_ctrl_pwrite_next = 1'b1;
                 m_apb_dp_ctrl_pwdata_next = 32'h00000000;
@@ -389,12 +437,12 @@ always_comb begin
         STATE_Q_RESET_2: begin
             // reset queue 2
 
-            cmd_ram_wr_data = 32'(block_base_addr_reg + 'h0004) + PORT_BASE_ADDR;
+            cmd_ram_wr_data = host_ptr_reg + 'h0004;
             cmd_ram_wr_addr = 7;
             cmd_ram_wr_en = 1'b1;
 
             if (!m_apb_dp_ctrl_psel_reg) begin
-                m_apb_dp_ctrl_paddr_next = block_base_addr_reg + 'h0004;
+                m_apb_dp_ctrl_paddr_next = dp_ptr_reg + 'h0004;
                 m_apb_dp_ctrl_psel_next = 1'b1;
                 m_apb_dp_ctrl_pwrite_next = 1'b1;
                 m_apb_dp_ctrl_pwdata_next = 32'h00000000;
@@ -409,7 +457,7 @@ always_comb begin
             // set queue base addr (LSB)
             cmd_ram_rd_addr = 8;
             if (!m_apb_dp_ctrl_psel_reg) begin
-                m_apb_dp_ctrl_paddr_next = block_base_addr_reg + 'h0008;
+                m_apb_dp_ctrl_paddr_next = dp_ptr_reg + 'h0008;
                 m_apb_dp_ctrl_psel_next = 1'b1;
                 m_apb_dp_ctrl_pwrite_next = 1'b1;
                 m_apb_dp_ctrl_pwdata_next = cmd_ram_rd_data;
@@ -424,7 +472,7 @@ always_comb begin
             // set queue base addr (MSB)
             cmd_ram_rd_addr = 9;
             if (!m_apb_dp_ctrl_psel_reg) begin
-                m_apb_dp_ctrl_paddr_next = block_base_addr_reg + 'h000C;
+                m_apb_dp_ctrl_paddr_next = dp_ptr_reg + 'h000C;
                 m_apb_dp_ctrl_psel_next = 1'b1;
                 m_apb_dp_ctrl_pwrite_next = 1'b1;
                 m_apb_dp_ctrl_pwdata_next = cmd_ram_rd_data;
@@ -439,7 +487,7 @@ always_comb begin
             // enable queue
             cmd_ram_rd_addr = 6;
             if (!m_apb_dp_ctrl_psel_reg) begin
-                m_apb_dp_ctrl_paddr_next = block_base_addr_reg + 'h0000;
+                m_apb_dp_ctrl_paddr_next = dp_ptr_reg + 'h0000;
                 m_apb_dp_ctrl_psel_next = 1'b1;
                 m_apb_dp_ctrl_pwrite_next = 1'b1;
                 m_apb_dp_ctrl_pwdata_next = '0;
@@ -459,7 +507,7 @@ always_comb begin
         STATE_Q_DISABLE: begin
             // disable queue
             if (!m_apb_dp_ctrl_psel_reg) begin
-                m_apb_dp_ctrl_paddr_next = block_base_addr_reg + 'h0000;
+                m_apb_dp_ctrl_paddr_next = dp_ptr_reg + 'h0000;
                 m_apb_dp_ctrl_psel_next = 1'b1;
                 m_apb_dp_ctrl_pwrite_next = 1'b1;
                 m_apb_dp_ctrl_pwdata_next = 32'h00000000;
@@ -474,15 +522,142 @@ always_comb begin
                 state_next = STATE_Q_DISABLE;
             end
         end
+        STATE_PTP_READ_1: begin
+            // read PTP register
+            if (!m_apb_dp_ctrl_psel_reg) begin
+                m_apb_dp_ctrl_paddr_next = dp_ptr_reg;
+                m_apb_dp_ctrl_psel_next = 1'b1;
+                m_apb_dp_ctrl_pwrite_next = 1'b0;
+                m_apb_dp_ctrl_pwdata_next = '0;
+                m_apb_dp_ctrl_pstrb_next = '1;
+
+                state_next = STATE_PTP_READ_2;
+            end else begin
+                state_next = STATE_PTP_READ_1;
+            end
+        end
+        STATE_PTP_READ_2: begin
+            // store read value and iterate
+            cmd_ram_wr_data = m_apb_dp_ctrl.prdata;
+            cmd_ram_wr_addr = cmd_ptr_reg;
+            cmd_ram_wr_en = 1'b1;
+
+            if (m_apb_dp_ctrl.pready) begin
+                cnt_next = cnt_reg + 1;
+                cmd_ptr_next = cmd_ptr_reg + 1;
+                dp_ptr_next = dp_ptr_reg + 4;
+
+                if (cnt_reg == 11) begin
+                    // done
+                    m_axis_rsp_tdata_next = '0; // TODO
+                    m_axis_rsp_tvalid_next = 1'b1;
+                    m_axis_rsp_tlast_next = 1'b0;
+
+                    state_next = STATE_SEND_RSP;
+                end else if (cnt_reg == 7) begin
+                    // jump to period registers
+                    dp_ptr_next = PTP_BASE_ADDR_DP + 'h70;
+                    state_next = STATE_PTP_READ_1;
+                end else begin
+                    // more to read
+                    state_next = STATE_PTP_READ_1;
+                end
+            end else begin
+                state_next = STATE_PTP_READ_2;
+            end
+        end
+        STATE_PTP_SET: begin
+            // update PTP registers
+            if (!m_apb_dp_ctrl_psel_reg) begin
+                cnt_next = cnt_reg + 1;
+                dp_ptr_next = dp_ptr_reg + 4;
+
+                case (cnt_reg[3:0])
+                    4'd0: begin
+                        // offset ToD
+                        cmd_ram_rd_addr = 3;
+                        m_apb_dp_ctrl_psel_next = flags_reg[1];
+                    end
+                    4'd1: begin
+                        // set ToD ns
+                        cmd_ram_rd_addr = 3;
+                        m_apb_dp_ctrl_psel_next = flags_reg[0];
+                    end
+                    4'd2: begin
+                        // set ToD sec l
+                        cmd_ram_rd_addr = 4;
+                        m_apb_dp_ctrl_psel_next = flags_reg[0];
+                    end
+                    4'd3: begin
+                        // set ToD sec h
+                        cmd_ram_rd_addr = 5;
+                        m_apb_dp_ctrl_psel_next = flags_reg[0];
+                    end
+                    4'd4: begin
+                        // set rel ns l
+                        cmd_ram_rd_addr = 6;
+                        m_apb_dp_ctrl_psel_next = flags_reg[2];
+                    end
+                    4'd5: begin
+                        // set rel ns h
+                        cmd_ram_rd_addr = 7;
+                        m_apb_dp_ctrl_psel_next = flags_reg[2];
+                    end
+                    4'd6: begin
+                        // offset rel
+                        cmd_ram_rd_addr = 6;
+                        m_apb_dp_ctrl_psel_next = flags_reg[3];
+                    end
+                    4'd7: begin
+                        // offset FNS
+                        cmd_ram_rd_addr = 2;
+                        m_apb_dp_ctrl_psel_next = flags_reg[4];
+                    end
+                    4'd10: begin
+                        // period fns
+                        cmd_ram_rd_addr = 12;
+                        m_apb_dp_ctrl_psel_next = flags_reg[7];
+                    end
+                    4'd11: begin
+                        // period ns
+                        cmd_ram_rd_addr = 13;
+                        m_apb_dp_ctrl_psel_next = flags_reg[7];
+                    end
+                    default: begin
+                        // skip
+                        m_apb_dp_ctrl_psel_next = 1'b0;
+                    end
+                endcase
+
+                m_apb_dp_ctrl_paddr_next = dp_ptr_reg;
+                m_apb_dp_ctrl_pwrite_next = 1'b1;
+                m_apb_dp_ctrl_pwdata_next = cmd_ram_rd_data;
+                m_apb_dp_ctrl_pstrb_next = '1;
+
+                if (cnt_reg == 11) begin
+                    // done
+                    m_axis_rsp_tdata_next = '0; // TODO
+                    m_axis_rsp_tvalid_next = 1'b1;
+                    m_axis_rsp_tlast_next = 1'b0;
+
+                    state_next = STATE_SEND_RSP;
+                end else begin
+                    // loop
+                    state_next = STATE_PTP_SET;
+                end
+            end else begin
+                state_next = STATE_PTP_SET;
+            end
+        end
         STATE_SEND_RSP: begin
             // send response in the form of an edited command
-            cmd_ram_rd_addr = rsp_ptr_reg;
+            cmd_ram_rd_addr = rsp_rd_ptr_reg;
             if (m_axis_rsp.tready || !m_axis_rsp.tvalid) begin
                 m_axis_rsp_tdata_next = cmd_ram_rd_data;
                 m_axis_rsp_tvalid_next = 1'b1;
-                m_axis_rsp_tlast_next = &rsp_ptr_reg;
+                m_axis_rsp_tlast_next = &rsp_rd_ptr_reg;
 
-                if (&rsp_ptr_reg) begin
+                if (&rsp_rd_ptr_reg) begin
                     state_next = STATE_IDLE;
                 end else begin
                     state_next = STATE_SEND_RSP;
@@ -496,9 +671,9 @@ always_comb begin
             if (m_axis_rsp.tready || !m_axis_rsp.tvalid) begin
                 m_axis_rsp_tdata_next = '0;
                 m_axis_rsp_tvalid_next = 1'b1;
-                m_axis_rsp_tlast_next = &rsp_ptr_reg;
+                m_axis_rsp_tlast_next = &rsp_rd_ptr_reg;
 
-                if (&rsp_ptr_reg) begin
+                if (&rsp_rd_ptr_reg) begin
                     state_next = STATE_IDLE;
                 end else begin
                     state_next = STATE_PAD_RSP;
@@ -523,9 +698,9 @@ always_comb begin
 
     if (m_axis_rsp_tvalid_next && (!m_axis_rsp_tvalid_reg || m_axis_rsp.tready)) begin
         if (m_axis_rsp_tlast_next) begin
-            rsp_ptr_next = '0;
+            rsp_rd_ptr_next = '0;
         end else begin
-            rsp_ptr_next = rsp_ptr_reg + 1;
+            rsp_rd_ptr_next = rsp_rd_ptr_reg + 1;
             rsp_frame_next = 1'b1;
         end
     end
@@ -533,7 +708,7 @@ always_comb begin
     if (m_axis_rsp.tready && m_axis_rsp.tvalid) begin
         if (m_axis_rsp.tlast) begin
             rsp_frame_next = 1'b0;
-            rsp_ptr_next = '0;
+            rsp_rd_ptr_next = '0;
         end
     end
 end
@@ -561,9 +736,9 @@ always_ff @(posedge clk) begin
     m_apb_dp_ctrl_pstrb_reg <= m_apb_dp_ctrl_pstrb_next;
 
     cmd_frame_reg <= cmd_frame_next;
-    cmd_ptr_reg <= cmd_ptr_next;
+    cmd_wr_ptr_reg <= cmd_wr_ptr_next;
     rsp_frame_reg <= rsp_frame_next;
-    rsp_ptr_reg <= rsp_ptr_next;
+    rsp_rd_ptr_reg <= rsp_rd_ptr_next;
 
     drop_cmd_reg <= drop_cmd_next;
 
@@ -572,7 +747,10 @@ always_ff @(posedge clk) begin
     port_reg <= port_next;
     qn_reg <= qn_next;
 
-    block_base_addr_reg <= block_base_addr_next;
+    cmd_ptr_reg <= cmd_ptr_next;
+    dp_ptr_reg <= dp_ptr_next;
+    host_ptr_reg <= host_ptr_next;
+    cnt_reg <= cnt_next;
 
     if (rst) begin
         state_reg <= STATE_IDLE;
@@ -584,9 +762,9 @@ always_ff @(posedge clk) begin
         m_apb_dp_ctrl_penable_reg <= 1'b0;
 
         cmd_frame_reg <= 1'b0;
-        cmd_ptr_reg <= '0;
+        cmd_wr_ptr_reg <= '0;
         rsp_frame_reg <= 1'b0;
-        rsp_ptr_reg <= '0;
+        rsp_rd_ptr_reg <= '0;
 
         drop_cmd_reg <= 1'b0;
     end

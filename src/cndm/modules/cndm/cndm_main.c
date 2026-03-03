@@ -56,12 +56,8 @@ static int cndm_common_probe(struct cndm_dev *cdev)
 #endif
 
 	cdev->port_count = ioread32(cdev->hw_addr + 0x0100);
-	cdev->port_offset = ioread32(cdev->hw_addr + 0x0104);
-	cdev->port_stride = ioread32(cdev->hw_addr + 0x0108);
 
 	dev_info(dev, "Port count: %d", cdev->port_count);
-	dev_info(dev, "Port offset: 0x%x", cdev->port_offset);
-	dev_info(dev, "Port stride: 0x%x", cdev->port_stride);
 
 	if (cdev->port_count > ARRAY_SIZE(cdev->ndev))
 		cdev->port_count = ARRAY_SIZE(cdev->ndev);

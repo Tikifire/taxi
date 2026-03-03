@@ -178,8 +178,8 @@ struct net_device *cndm_create_netdev(struct cndm_dev *cdev, int port)
 	struct cndm_priv *priv;
 	int ret = 0;
 
-	struct cndm_cmd cmd;
-	struct cndm_cmd rsp;
+	struct cndm_cmd_queue cmd;
+	struct cndm_cmd_queue rsp;
 
 	ndev = alloc_etherdev_mqs(sizeof(*priv), 1, 1);
 	if (!ndev) {
@@ -373,8 +373,8 @@ void cndm_destroy_netdev(struct net_device *ndev)
 	struct cndm_dev *cdev = priv->cdev;
 	struct device *dev = priv->dev;
 
-	struct cndm_cmd cmd;
-	struct cndm_cmd rsp;
+	struct cndm_cmd_queue cmd;
+	struct cndm_cmd_queue rsp;
 
 	cmd.opcode = CNDM_CMD_OP_DESTROY_CQ;
 	cmd.flags = 0x00000000;

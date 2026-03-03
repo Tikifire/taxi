@@ -20,6 +20,7 @@ from cocotb.queue import Queue
 CNDM_CMD_OP_NOP = 0x0000
 
 CNDM_CMD_OP_ACCESS_REG = 0x0180
+CNDM_CMD_OP_PTP        = 0x0190
 
 CNDM_CMD_OP_CREATE_EQ  = 0x0200
 CNDM_CMD_OP_MODIFY_EQ  = 0x0201
@@ -46,6 +47,15 @@ CNDM_CMD_OP_MODIFY_QP  = 0x0241
 CNDM_CMD_OP_QUERY_QP   = 0x0242
 CNDM_CMD_OP_DESTROY_QP = 0x0243
 
+CNDM_CMD_REG_FLG_WRITE  = 0x00000001
+CNDM_CMD_REG_FLG_RAW    = 0x00000100
+
+CNDM_CMD_PTP_FLG_SET_TOD    = 0x00000001
+CNDM_CMD_PTP_FLG_OFFSET_TOD = 0x00000002
+CNDM_CMD_PTP_FLG_SET_REL    = 0x00000004
+CNDM_CMD_PTP_FLG_OFFSET_REL = 0x00000008
+CNDM_CMD_PTP_FLG_OFFSET_FNS = 0x00000010
+CNDM_CMD_PTP_FLG_SET_PERIOD = 0x00000080
 
 class Port:
     def __init__(self, driver, index):
@@ -348,12 +358,48 @@ class Driver:
 
     async def init_common(self):
         self.port_count = await self.hw_regs.read_dword(0x0100)
-        self.port_offset = await self.hw_regs.read_dword(0x0104)
-        self.port_stride = await self.hw_regs.read_dword(0x0108)
 
         self.log.info("Port count: %d", self.port_count)
-        self.log.info("Port offset: 0x%x", self.port_offset)
-        self.log.info("Port stride: 0x%x", self.port_stride)
+
+        # Get PTP information
+        rsp = await self.exec_cmd(struct.pack("<HHLLLQQQQQLL",
+            0, # rsvd
+            CNDM_CMD_OP_PTP, # opcode
+            0x00000000, # flags
+            0, # fns
+            0, # tod_ns
+            0, # tod_sec
+            0, # rel_ns
+            0, # ptm
+            0, # nom_period
+            0, # period
+            0, # rsvd
+            0, # rsvd
+        ))
+
+        rsp_unpacked = struct.unpack("<HHLLLQQQQQLL", rsp)
+        print(rsp_unpacked)
+
+        nom_period = rsp_unpacked[8]
+        self.log.info("PHC nominal period: %.09f ns (raw 0x%x)", nom_period / 2**32, nom_period)
+
+        rsp = await self.exec_cmd(struct.pack("<HHLLLQQQQQLL",
+            0, # rsvd
+            CNDM_CMD_OP_PTP, # opcode
+            CNDM_CMD_PTP_FLG_SET_TOD | CNDM_CMD_PTP_FLG_SET_REL | CNDM_CMD_PTP_FLG_SET_PERIOD, # flags
+            0, # fns
+            0x12345678, # tod_ns
+            0x123456654321, # tod_sec
+            0x11223344, # rel_ns
+            0, # ptm
+            0, # nom_period
+            nom_period, # period
+            0, # rsvd
+            0, # rsvd
+        ))
+
+        rsp_unpacked = struct.unpack("<HHLLLQQQQQLL", rsp)
+        print(rsp_unpacked)
 
         for k in range(self.port_count):
             port = Port(self, k)
@@ -365,24 +411,24 @@ class Driver:
     async def access_reg(self, reg, raw, write=False, data=0):
         flags = 0
         if raw:
-            flags |= 0x00000100
+            flags |= CNDM_CMD_REG_FLG_RAW
         if write:
-            flags |= 0x00000001
+            flags |= CNDM_CMD_REG_FLG_WRITE
 
         rsp = await self.exec_cmd(struct.pack("<HHLLLLLLLQQLLLL",
             0, # rsvd
             CNDM_CMD_OP_ACCESS_REG, # opcode
             flags, # flags
-            0, # port
-            0, # sqn
-            0, # cqn
-            0, # pd
-            0, # size
-            reg, # dboffs
-            data, # base addr
-            0, # ptr2
-            0, # prod_ptr
-            0, # cons_ptr
+            0, # rsvd
+            0, # rsvd
+            0, # rsvd
+            0, # rsvd
+            0, # rsvd
+            reg, # reg
+            data, # write data
+            0, # read data
+            0, # rsvd
+            0, # rsvd
             0, # rsvd
             0, # rsvd
         ))

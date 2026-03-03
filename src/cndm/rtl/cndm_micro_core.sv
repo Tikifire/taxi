@@ -106,8 +106,10 @@ localparam RAM_SEG_DATA_W = dma_ram_wr.SEG_DATA_W;
 localparam RAM_SEG_BE_W = dma_ram_wr.SEG_BE_W;
 localparam RAM_SEL_W = dma_ram_wr.SEL_W;
 
-localparam PORT_OFFSET = PTP_TS_EN ? 3 : 2;
-localparam PORT_BASE_ADDR = PTP_TS_EN ? 32'h00030000 : 32'h00020000;
+localparam PORT_OFFSET_DP = PTP_TS_EN ? 1 : 0;
+localparam PORT_OFFSET_HOST = 2;
+localparam PORT_BASE_ADDR_DP = PTP_TS_EN ? 32'h00010000 : 32'h00000000;
+localparam PORT_BASE_ADDR_HOST = 32'h00020000;
 
 taxi_axil_if #(
     .DATA_W(s_axil_ctrl_wr.DATA_W),
@@ -124,7 +126,7 @@ taxi_axil_if #(
     .RUSER_EN(s_axil_ctrl_wr.RUSER_EN),
     .RUSER_W(s_axil_ctrl_wr.RUSER_W)
 )
-axil_ctrl[PORTS+PORT_OFFSET]();
+axil_ctrl[PORTS+PORT_OFFSET_HOST]();
 
 taxi_axil_interconnect_1s #(
     .M_COUNT($size(axil_ctrl)),
@@ -174,6 +176,9 @@ assign axil_ctrl[0].rvalid = s_axil_rvalid_reg;
 logic cmd_mbox_start_reg = 1'b0;
 wire cmd_mbox_busy;
 
+logic [95:0] get_ptp_ts_tod_reg = '0;
+logic [63:0] get_ptp_ts_rel_reg = '0;
+
 always_ff @(posedge clk) begin
     s_axil_awready_reg <= 1'b0;
     s_axil_wready_reg <= 1'b0;
@@ -212,11 +217,30 @@ always_ff @(posedge clk) begin
 
         case ({axil_ctrl[0].araddr[15:2], 2'b00})
             16'h0100: s_axil_rdata_reg <= PORTS; // port count
-            16'h0104: s_axil_rdata_reg <= PORT_BASE_ADDR; // port offset
-            16'h0108: s_axil_rdata_reg <= 32'h00010000; // port stride
             16'h0200: begin
                 s_axil_rdata_reg[0] <= cmd_mbox_busy;
             end
+            16'h0300: s_axil_rdata_reg <= {ptp_sync_ts_tod[15:0], 16'd0};  // PTP cur fns
+            16'h0304: s_axil_rdata_reg <= ptp_sync_ts_tod[47:16];          // PTP cur ToD ns
+            16'h0308: s_axil_rdata_reg <= ptp_sync_ts_tod[79:48];          // PTP cur ToD sec l
+            16'h030C: s_axil_rdata_reg <= 32'(ptp_sync_ts_tod[95:80]);     // PTP cur ToD sec h
+            16'h0310: s_axil_rdata_reg <= ptp_sync_ts_rel[47:16];          // PTP cur rel ns l
+            16'h0314: s_axil_rdata_reg <= 32'(ptp_sync_ts_rel[63:48]);     // PTP cur rel ns h
+            16'h0318: s_axil_rdata_reg <= '0;                              // PTP cur PTM l
+            16'h031C: s_axil_rdata_reg <= '0;                              // PTP cur PTM h
+            16'h0320: begin
+                // PTP snapshot fns
+                get_ptp_ts_tod_reg <= ptp_sync_ts_tod;
+                get_ptp_ts_rel_reg <= ptp_sync_ts_rel;
+                s_axil_rdata_reg <= {ptp_sync_ts_tod[15:0], 16'd0};
+            end
+            16'h0324: s_axil_rdata_reg <= 32'(get_ptp_ts_tod_reg[45:16]);  // PTP snapshot ToD ns
+            16'h0328: s_axil_rdata_reg <= get_ptp_ts_tod_reg[79:48];       // PTP snapshot ToD sec l
+            16'h032C: s_axil_rdata_reg <= 32'(get_ptp_ts_tod_reg[95:80]);  // PTP snapshot ToD sec h
+            16'h0330: s_axil_rdata_reg <= get_ptp_ts_rel_reg[47:16];       // PTP snapshot rel ns l
+            16'h0334: s_axil_rdata_reg <= 32'(get_ptp_ts_rel_reg[63:48]);  // PTP snapshot rel ns h
+            16'h0338: s_axil_rdata_reg <= '0;                              // PTP snapshot PTM l
+            16'h033C: s_axil_rdata_reg <= '0;                              // PTP snapshot PTM h
             default: begin end
         endcase
     end
@@ -278,13 +302,16 @@ cmd_mbox_inst (
 
 taxi_apb_if #(
     .DATA_W(32),
-    .ADDR_W(16+CL_PORTS)
+    .ADDR_W(16+$clog2(PORTS+PORT_OFFSET_DP))
 )
 apb_dp_ctrl();
 
 cndm_micro_dp_mgr #(
     .PORTS(PORTS),
-    .PORT_BASE_ADDR(PORT_BASE_ADDR)
+    .PTP_EN(PTP_TS_EN),
+    .PTP_BASE_ADDR_DP(0),
+    .PORT_BASE_ADDR_DP(PORT_BASE_ADDR_DP),
+    .PORT_BASE_ADDR_HOST(PORT_BASE_ADDR_HOST)
 )
 dp_mgr_inst (
     .clk(clk),
@@ -306,7 +333,7 @@ taxi_apb_if #(
     .DATA_W(32),
     .ADDR_W(16)
 )
-apb_port_dp_ctrl[PORTS]();
+apb_port_dp_ctrl[PORT_OFFSET_DP+PORTS]();
 
 taxi_apb_interconnect #(
     .M_CNT($size(apb_port_dp_ctrl)),
@@ -333,7 +360,7 @@ port_dp_intercon_inst (
 
 if (PTP_TS_EN) begin : ptp
 
-    taxi_ptp_td_phc_axil #(
+    taxi_ptp_td_phc_apb #(
         .PTP_CLK_PER_NS_NUM(PTP_CLK_PER_NS_NUM),
         .PTP_CLK_PER_NS_DENOM(PTP_CLK_PER_NS_DENOM)
     )
@@ -344,8 +371,7 @@ if (PTP_TS_EN) begin : ptp
         /*
          * Control register interface
          */
-        .s_axil_wr(axil_ctrl[2]),
-        .s_axil_rd(axil_ctrl[2]),
+        .s_apb(apb_port_dp_ctrl[0]),
 
         /*
          * PTP
@@ -474,13 +500,13 @@ for (genvar p = 0; p < PORTS; p = p + 1) begin : port
         /*
          * Control register interface
          */
-        .s_axil_ctrl_wr(axil_ctrl[PORT_OFFSET+p]),
-        .s_axil_ctrl_rd(axil_ctrl[PORT_OFFSET+p]),
+        .s_axil_ctrl_wr(axil_ctrl[PORT_OFFSET_HOST+p]),
+        .s_axil_ctrl_rd(axil_ctrl[PORT_OFFSET_HOST+p]),
 
         /*
          * Datapath control register interface
          */
-        .s_apb_dp_ctrl(apb_port_dp_ctrl[p]),
+        .s_apb_dp_ctrl(apb_port_dp_ctrl[PORT_OFFSET_DP+p]),
 
         /*
          * DMA

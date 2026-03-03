@@ -16,6 +16,7 @@ Authors:
 #define CNDM_CMD_OP_NOP 0x0000
 
 #define CNDM_CMD_OP_ACCESS_REG 0x0180
+#define CNDM_CMD_OP_PTP        0x0190
 
 #define CNDM_CMD_OP_CREATE_EQ  0x0200
 #define CNDM_CMD_OP_MODIFY_EQ  0x0201
@@ -42,7 +43,7 @@ Authors:
 #define CNDM_CMD_OP_QUERY_QP   0x0242
 #define CNDM_CMD_OP_DESTROY_QP 0x0243
 
-struct cndm_cmd {
+struct cndm_cmd_queue {
 	__le16 rsvd;
 	union {
 		__le16 opcode;
@@ -62,6 +63,61 @@ struct cndm_cmd {
 
 	__le32 dw12;
 	__le32 dw13;
+	__le32 dw14;
+	__le32 dw15;
+};
+
+#define CNDM_CMD_REG_FLG_WRITE  0x00000001
+#define CNDM_CMD_REG_FLG_RAW    0x00000100
+
+struct cndm_cmd_reg {
+	__le16 rsvd;
+	union {
+		__le16 opcode;
+		__le16 status;
+	};
+	__le32 flags;
+	__le32 dw2;
+	__le32 dw3;
+
+	__le32 dw4;
+	__le32 dw5;
+	__le32 dw6;
+	__le32 reg_addr;
+
+	__le64 write_val;
+	__le64 read_val;
+
+	__le32 dw12;
+	__le32 dw13;
+	__le32 dw14;
+	__le32 dw15;
+};
+
+#define CNDM_CMD_PTP_FLG_SET_TOD    0x00000001
+#define CNDM_CMD_PTP_FLG_OFFSET_TOD 0x00000002
+#define CNDM_CMD_PTP_FLG_SET_REL    0x00000004
+#define CNDM_CMD_PTP_FLG_OFFSET_REL 0x00000008
+#define CNDM_CMD_PTP_FLG_OFFSET_FNS 0x00000010
+#define CNDM_CMD_PTP_FLG_SET_PERIOD 0x00000080
+
+struct cndm_cmd_ptp {
+	__le16 rsvd;
+	union {
+		__le16 opcode;
+		__le16 status;
+	};
+	__le32 flags;
+	__le32 fns;
+	__le32 tod_ns;
+
+	__le64 tod_sec;
+	__le64 rel_ns;
+
+	__le64 ptm;
+	__le64 nom_period;
+
+	__le64 period;
 	__le32 dw14;
 	__le32 dw15;
 };

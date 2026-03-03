@@ -54,12 +54,10 @@ struct cndm_dev {
 	struct mutex mbox_lock;
 
 	u32 port_count;
-	u32 port_offset;
-	u32 port_stride;
 
-	void __iomem *phc_regs;
 	struct ptp_clock *ptp_clock;
 	struct ptp_clock_info ptp_clock_info;
+	u64 ptp_nom_period;
 };
 
 struct cndm_tx_info {
