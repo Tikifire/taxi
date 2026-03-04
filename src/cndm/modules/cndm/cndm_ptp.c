@@ -11,22 +11,22 @@ Authors:
 #include "cndm.h"
 #include <linux/version.h>
 
-ktime_t cndm_read_cpl_ts(struct cndm_priv *priv, const struct cndm_cpl *cpl)
+ktime_t cndm_read_cpl_ts(struct cndm_ring *ring, const struct cndm_cpl *cpl)
 {
-	struct cndm_dev *cdev = priv->cdev;
+	struct cndm_dev *cdev = ring->cdev;
 
 	// u64 ts_s = le16_to_cpu(cpl->ts_s);
 	u64 ts_s = cpl->ts_s;
 	u32 ts_ns = le32_to_cpu(cpl->ts_ns);
 
-	if (unlikely(!priv->ts_valid || (priv->ts_s ^ ts_s) & 0xf0)) {
+	if (unlikely(!ring->ts_valid || (ring->ts_s ^ ts_s) & 0xf0)) {
 		// seconds MSBs do not match, update cached timestamp
-		priv->ts_s = ioread32(cdev->hw_addr + 0x0308);
-		priv->ts_s |= (u64) ioread32(cdev->hw_addr + 0x030C) << 32;
-		priv->ts_valid = 1;
+		ring->ts_s = ioread32(cdev->hw_addr + 0x0308);
+		ring->ts_s |= (u64) ioread32(cdev->hw_addr + 0x030C) << 32;
+		ring->ts_valid = 1;
 	}
 
-	ts_s |= priv->ts_s & 0xfffffffffffffff0;
+	ts_s |= ring->ts_s & 0xfffffffffffffff0;
 
 	dev_dbg(cdev->dev, "%s: Read timestamp: %lld.%09d", __func__, ts_s, ts_ns);
 

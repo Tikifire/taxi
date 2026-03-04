@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL
 /*
 
-Copyright (c) 2025 FPGA Ninja, LLC
+Copyright (c) 2025-2026 FPGA Ninja, LLC
 
 Authors:
 - Alex Forencich
@@ -17,14 +17,14 @@ static int cndm_open(struct net_device *ndev)
 {
 	struct cndm_priv *priv = netdev_priv(ndev);
 
-	cndm_refill_rx_buffers(priv);
+	cndm_refill_rx_buffers(priv->rxq);
 
-	priv->tx_queue = netdev_get_tx_queue(ndev, 0);
+	priv->txq->tx_queue = netdev_get_tx_queue(ndev, 0);
 
-	netif_napi_add_tx(ndev, &priv->tx_napi, cndm_poll_tx_cq);
-	napi_enable(&priv->tx_napi);
-	netif_napi_add(ndev, &priv->rx_napi, cndm_poll_rx_cq);
-	napi_enable(&priv->rx_napi);
+	netif_napi_add_tx(ndev, &priv->txcq->napi, cndm_poll_tx_cq);
+	napi_enable(&priv->txcq->napi);
+	netif_napi_add(ndev, &priv->rxcq->napi, cndm_poll_rx_cq);
+	napi_enable(&priv->rxcq->napi);
 
 	netif_tx_start_all_queues(ndev);
 	netif_carrier_on(ndev);
@@ -39,12 +39,19 @@ static int cndm_close(struct net_device *ndev)
 {
 	struct cndm_priv *priv = netdev_priv(ndev);
 
+	if (!priv->port_up)
+		return 0;
+
 	priv->port_up = 0;
 
-	napi_disable(&priv->tx_napi);
-	netif_napi_del(&priv->tx_napi);
-	napi_disable(&priv->rx_napi);
-	netif_napi_del(&priv->rx_napi);
+	if (priv->txcq) {
+		napi_disable(&priv->txcq->napi);
+		netif_napi_del(&priv->txcq->napi);
+	}
+	if (priv->rxcq) {
+		napi_disable(&priv->rxcq->napi);
+		netif_napi_del(&priv->rxcq->napi);
+	}
 
 	netif_tx_stop_all_queues(ndev);
 	netif_carrier_off(ndev);
@@ -164,8 +171,8 @@ static int cndm_netdev_irq(struct notifier_block *nb, unsigned long action, void
 	netdev_dbg(priv->ndev, "Interrupt");
 
 	if (priv->port_up) {
-		napi_schedule_irqoff(&priv->tx_napi);
-		napi_schedule_irqoff(&priv->rx_napi);
+		napi_schedule_irqoff(&priv->txcq->napi);
+		napi_schedule_irqoff(&priv->rxcq->napi);
 	}
 
 	return NOTIFY_DONE;
@@ -177,9 +184,6 @@ struct net_device *cndm_create_netdev(struct cndm_dev *cdev, int port)
 	struct net_device *ndev;
 	struct cndm_priv *priv;
 	int ret = 0;
-
-	struct cndm_cmd_queue cmd;
-	struct cndm_cmd_queue rsp;
 
 	ndev = alloc_etherdev_mqs(sizeof(*priv), 1, 1);
 	if (!ndev) {
@@ -198,6 +202,9 @@ struct net_device *cndm_create_netdev(struct cndm_dev *cdev, int port)
 	priv->cdev = cdev;
 
 	priv->hw_addr = cdev->hw_addr;
+
+	priv->rxq_count = 1;
+	priv->txq_count = 1;
 
 	netif_set_real_num_tx_queues(ndev, 1);
 	netif_set_real_num_rx_queues(ndev, 1);
@@ -219,133 +226,53 @@ struct net_device *cndm_create_netdev(struct cndm_dev *cdev, int port)
 	ndev->min_mtu = ETH_MIN_MTU;
 	ndev->max_mtu = 1500;
 
-	priv->rxq_log_size = ilog2(256);
-	priv->rxq_size = 1 << priv->rxq_log_size;
-	priv->rxq_mask = priv->rxq_size-1;
-	priv->rxq_prod = 0;
-	priv->rxq_cons = 0;
-
-	priv->txq_log_size = ilog2(256);
-	priv->txq_size = 1 << priv->txq_log_size;
-	priv->txq_mask = priv->txq_size-1;
-	priv->txq_prod = 0;
-	priv->txq_cons = 0;
-
-	priv->rxcq_log_size = ilog2(256);
-	priv->rxcq_size = 1 << priv->rxcq_log_size;
-	priv->rxcq_mask = priv->rxcq_size-1;
-	priv->rxcq_prod = 0;
-	priv->rxcq_cons = 0;
-
-	priv->txcq_log_size = ilog2(256);
-	priv->txcq_size = 1 << priv->txcq_log_size;
-	priv->txcq_mask = priv->txcq_size-1;
-	priv->txcq_prod = 0;
-	priv->txcq_cons = 0;
-
-	// allocate DMA buffers
-	priv->txq_region_len = priv->txq_size*16;
-	priv->txq_region = dma_alloc_coherent(dev, priv->txq_region_len, &priv->txq_region_addr, GFP_KERNEL | __GFP_ZERO);
-	if (!priv->txq_region) {
-		ret = -ENOMEM;
+	priv->rxcq = cndm_create_cq(priv);
+	if (IS_ERR_OR_NULL(priv->rxcq)) {
+		ret = PTR_ERR(priv->rxcq);
+		goto fail;
+	}
+	ret = cndm_open_cq(priv->rxcq, 0, 256);
+	if (ret) {
+		cndm_destroy_cq(priv->rxcq);
+		priv->rxcq = NULL;
 		goto fail;
 	}
 
-	priv->rxq_region_len = priv->rxq_size*16;
-	priv->rxq_region = dma_alloc_coherent(dev, priv->rxq_region_len, &priv->rxq_region_addr, GFP_KERNEL | __GFP_ZERO);
-	if (!priv->rxq_region) {
-		ret = -ENOMEM;
+	priv->rxq = cndm_create_rq(priv);
+	if (IS_ERR_OR_NULL(priv->rxq)) {
+		ret = PTR_ERR(priv->rxq);
+		goto fail;
+	}
+	ret = cndm_open_rq(priv->rxq, priv, priv->rxcq, 256);
+	if (ret) {
+		cndm_destroy_rq(priv->rxq);
+		priv->rxq = NULL;
 		goto fail;
 	}
 
-	priv->txcq_region_len = priv->txcq_size*16;
-	priv->txcq_region = dma_alloc_coherent(dev, priv->txcq_region_len, &priv->txcq_region_addr, GFP_KERNEL | __GFP_ZERO);
-	if (!priv->txcq_region) {
-		ret = -ENOMEM;
+	priv->txcq = cndm_create_cq(priv);
+	if (IS_ERR_OR_NULL(priv->txcq)) {
+		ret = PTR_ERR(priv->txcq);
+		goto fail;
+	}
+	ret = cndm_open_cq(priv->txcq, 0, 256);
+	if (ret) {
+		cndm_destroy_cq(priv->txcq);
+		priv->txcq = NULL;
 		goto fail;
 	}
 
-	priv->rxcq_region_len = priv->rxcq_size*16;
-	priv->rxcq_region = dma_alloc_coherent(dev, priv->rxcq_region_len, &priv->rxcq_region_addr, GFP_KERNEL | __GFP_ZERO);
-	if (!priv->rxcq_region) {
-		ret = -ENOMEM;
+	priv->txq = cndm_create_sq(priv);
+	if (IS_ERR_OR_NULL(priv->txq)) {
+		ret = PTR_ERR(priv->txq);
 		goto fail;
 	}
-
-	// allocate info rings
-	priv->tx_info = kvzalloc(sizeof(*priv->tx_info) * priv->txq_size, GFP_KERNEL);
-	if (!priv->tx_info) {
-		ret = -ENOMEM;
+	ret = cndm_open_sq(priv->txq, priv, priv->txcq, 256);
+	if (ret) {
+		cndm_destroy_sq(priv->txq);
+		priv->txq = NULL;
 		goto fail;
 	}
-
-	priv->rx_info = kvzalloc(sizeof(*priv->rx_info) * priv->rxq_size, GFP_KERNEL);
-	if (!priv->tx_info) {
-		ret = -ENOMEM;
-		goto fail;
-	}
-
-	cmd.opcode = CNDM_CMD_OP_CREATE_CQ;
-	cmd.flags = 0x00000000;
-	cmd.port = port;
-	cmd.qn = 0;
-	cmd.qn2 = port;
-	cmd.pd = 0;
-	cmd.size = priv->rxcq_log_size;
-	cmd.dboffs = 0;
-	cmd.ptr1 = priv->rxcq_region_addr;
-	cmd.ptr2 = 0;
-
-	cndm_exec_cmd(cdev, &cmd, &rsp);
-
-	priv->rx_cqn = rsp.qn;
-
-	cmd.opcode = CNDM_CMD_OP_CREATE_RQ;
-	cmd.flags = 0x00000000;
-	cmd.port = port;
-	cmd.qn = 0;
-	cmd.qn2 = priv->rx_cqn;
-	cmd.pd = 0;
-	cmd.size = priv->rxq_log_size;
-	cmd.dboffs = 0;
-	cmd.ptr1 = priv->rxq_region_addr;
-	cmd.ptr2 = 0;
-
-	cndm_exec_cmd(cdev, &cmd, &rsp);
-
-	priv->rx_rqn = rsp.qn;
-	priv->rxq_db_offs = rsp.dboffs;
-
-	cmd.opcode = CNDM_CMD_OP_CREATE_CQ;
-	cmd.flags = 0x00000000;
-	cmd.port = port;
-	cmd.qn = 0;
-	cmd.qn2 = port;
-	cmd.pd = 0;
-	cmd.size = priv->txcq_log_size;
-	cmd.dboffs = 0;
-	cmd.ptr1 = priv->txcq_region_addr;
-	cmd.ptr2 = 0;
-
-	cndm_exec_cmd(cdev, &cmd, &rsp);
-
-	priv->tx_cqn = rsp.qn;
-
-	cmd.opcode = CNDM_CMD_OP_CREATE_SQ;
-	cmd.flags = 0x00000000;
-	cmd.port = port;
-	cmd.qn = 0;
-	cmd.qn2 = priv->tx_cqn;
-	cmd.pd = 0;
-	cmd.size = priv->txq_log_size;
-	cmd.dboffs = 0;
-	cmd.ptr1 = priv->txq_region_addr;
-	cmd.ptr2 = 0;
-
-	cndm_exec_cmd(cdev, &cmd, &rsp);
-
-	priv->tx_sqn = rsp.qn;
-	priv->txq_db_offs = rsp.dboffs;
 
 	netif_carrier_off(ndev);
 
@@ -376,39 +303,33 @@ fail:
 void cndm_destroy_netdev(struct net_device *ndev)
 {
 	struct cndm_priv *priv = netdev_priv(ndev);
-	struct cndm_dev *cdev = priv->cdev;
-	struct device *dev = priv->dev;
 
-	struct cndm_cmd_queue cmd;
-	struct cndm_cmd_queue rsp;
+	if (priv->port_up)
+		cndm_close(ndev);
 
-	cmd.opcode = CNDM_CMD_OP_DESTROY_SQ;
-	cmd.flags = 0x00000000;
-	cmd.port = ndev->dev_port;
-	cmd.qn = priv->tx_sqn;
+	if (priv->txq) {
+		cndm_close_sq(priv->txq);
+		cndm_destroy_sq(priv->txq);
+		priv->txq = NULL;
+	}
 
-	cndm_exec_cmd(cdev, &cmd, &rsp);
+	if (priv->txcq) {
+		cndm_close_cq(priv->txcq);
+		cndm_destroy_cq(priv->txcq);
+		priv->txcq = NULL;
+	}
 
-	cmd.opcode = CNDM_CMD_OP_DESTROY_CQ;
-	cmd.flags = 0x00000000;
-	cmd.port = ndev->dev_port;
-	cmd.qn = priv->tx_cqn;
+	if (priv->rxq) {
+		cndm_close_rq(priv->rxq);
+		cndm_destroy_rq(priv->rxq);
+		priv->rxq = NULL;
+	}
 
-	cndm_exec_cmd(cdev, &cmd, &rsp);
-
-	cmd.opcode = CNDM_CMD_OP_DESTROY_RQ;
-	cmd.flags = 0x00000000;
-	cmd.port = ndev->dev_port;
-	cmd.qn = priv->rx_rqn;
-
-	cndm_exec_cmd(cdev, &cmd, &rsp);
-
-	cmd.opcode = CNDM_CMD_OP_DESTROY_CQ;
-	cmd.flags = 0x00000000;
-	cmd.port = ndev->dev_port;
-	cmd.qn = priv->rx_cqn;
-
-	cndm_exec_cmd(cdev, &cmd, &rsp);
+	if (priv->rxcq) {
+		cndm_close_cq(priv->rxcq);
+		cndm_destroy_cq(priv->rxcq);
+		priv->rxcq = NULL;
+	}
 
 	if (priv->irq)
 		atomic_notifier_chain_unregister(&priv->irq->nh, &priv->irq_nb);
@@ -417,23 +338,6 @@ void cndm_destroy_netdev(struct net_device *ndev)
 
 	if (priv->registered)
 		unregister_netdev(ndev);
-
-	if (priv->tx_info) {
-		cndm_free_tx_buf(priv);
-		kvfree(priv->tx_info);
-	}
-	if (priv->rx_info) {
-		cndm_free_rx_buf(priv);
-		kvfree(priv->rx_info);
-	}
-	if (priv->txq_region)
-		dma_free_coherent(dev, priv->txq_region_len, priv->txq_region, priv->txq_region_addr);
-	if (priv->rxq_region)
-		dma_free_coherent(dev, priv->rxq_region_len, priv->rxq_region, priv->rxq_region_addr);
-	if (priv->txcq_region)
-		dma_free_coherent(dev, priv->txcq_region_len, priv->txcq_region, priv->txcq_region_addr);
-	if (priv->rxcq_region)
-		dma_free_coherent(dev, priv->rxcq_region_len, priv->rxcq_region, priv->rxcq_region_addr);
 
 	free_netdev(ndev);
 }

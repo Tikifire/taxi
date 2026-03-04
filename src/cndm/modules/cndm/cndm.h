@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL */
 /*
 
-Copyright (c) 2025 FPGA Ninja, LLC
+Copyright (c) 2025-2026 FPGA Ninja, LLC
 
 Authors:
 - Alex Forencich
@@ -73,6 +73,71 @@ struct cndm_rx_info {
 	u32 len;
 };
 
+struct cndm_ring {
+	// written on enqueue
+	u32 prod_ptr;
+	u64 bytes;
+	u64 packet;
+	u64 dropped_packets;
+	struct netdev_queue *tx_queue;
+
+	// written from completion
+	u32 cons_ptr ____cacheline_aligned_in_smp;
+	u64 ts_s;
+	u8 ts_valid;
+
+	// mostly constant
+	u32 size;
+	u32 full_size;
+	u32 size_mask;
+	u32 stride;
+
+	u32 mtu;
+
+	size_t buf_size;
+	u8 *buf;
+	dma_addr_t buf_dma_addr;
+
+	union {
+		struct cndm_tx_info *tx_info;
+		struct cndm_rx_info *rx_info;
+	};
+
+	struct device *dev;
+	struct cndm_dev *cdev;
+	struct cndm_priv *priv;
+	int index;
+	int enabled;
+
+	struct cndm_cq *cq;
+
+	u32 db_offset;
+	u8 __iomem *db_addr;
+} ____cacheline_aligned_in_smp;
+
+struct cndm_cq {
+	u32 cons_ptr;
+
+	u32 size;
+	u32 size_mask;
+	u32 stride;
+
+	size_t buf_size;
+	u8 *buf;
+	dma_addr_t buf_dma_addr;
+
+	struct device *dev;
+	struct cndm_dev *cdev;
+	struct cndm_priv *priv;
+	struct napi_struct napi;
+	int cqn;
+	int enabled;
+
+	struct cndm_ring *src_ring;
+
+	void (*handler)(struct cndm_cq *cq);
+};
+
 struct cndm_priv {
 	struct device *dev;
 	struct net_device *ndev;
@@ -83,66 +148,18 @@ struct cndm_priv {
 
 	void __iomem *hw_addr;
 
-	size_t txq_region_len;
-	void *txq_region;
-	dma_addr_t txq_region_addr;
-
 	struct cndm_irq *irq;
 	struct notifier_block irq_nb;
 
 	struct hwtstamp_config hwts_config;
-	u64 ts_s;
-	u8 ts_valid;
 
-	struct cndm_tx_info *tx_info;
-	struct cndm_rx_info *rx_info;
+	int rxq_count;
+	int txq_count;
 
-	struct netdev_queue *tx_queue;
-
-	struct napi_struct tx_napi;
-	struct napi_struct rx_napi;
-
-	u32 txq_log_size;
-	u32 txq_size;
-	u32 txq_mask;
-	u32 txq_prod;
-	u32 txq_cons;
-	u32 txq_db_offs;
-	u32 tx_sqn;
-
-	size_t rxq_region_len;
-	void *rxq_region;
-	dma_addr_t rxq_region_addr;
-
-	u32 rxq_log_size;
-	u32 rxq_size;
-	u32 rxq_mask;
-	u32 rxq_prod;
-	u32 rxq_cons;
-	u32 rxq_db_offs;
-	u32 rx_rqn;
-
-	size_t txcq_region_len;
-	void *txcq_region;
-	dma_addr_t txcq_region_addr;
-
-	u32 txcq_log_size;
-	u32 txcq_size;
-	u32 txcq_mask;
-	u32 txcq_prod;
-	u32 txcq_cons;
-	u32 tx_cqn;
-
-	size_t rxcq_region_len;
-	void *rxcq_region;
-	dma_addr_t rxcq_region_addr;
-
-	u32 rxcq_log_size;
-	u32 rxcq_size;
-	u32 rxcq_mask;
-	u32 rxcq_prod;
-	u32 rxcq_cons;
-	u32 rx_cqn;
+	struct cndm_ring *txq;
+	struct cndm_cq *txcq;
+	struct cndm_ring *rxq;
+	struct cndm_cq *rxcq;
 };
 
 // cndm_cmd.c
@@ -169,18 +186,32 @@ extern const struct file_operations cndm_fops;
 extern const struct ethtool_ops cndm_ethtool_ops;
 
 // cndm_ptp.c
-ktime_t cndm_read_cpl_ts(struct cndm_priv *priv, const struct cndm_cpl *cpl);
+ktime_t cndm_read_cpl_ts(struct cndm_ring *ring, const struct cndm_cpl *cpl);
 void cndm_register_phc(struct cndm_dev *cdev);
 void cndm_unregister_phc(struct cndm_dev *cdev);
 
-// cndm_tx.c
-int cndm_free_tx_buf(struct cndm_priv *priv);
+// cndm_cq.c
+struct cndm_cq *cndm_create_cq(struct cndm_priv *priv);
+void cndm_destroy_cq(struct cndm_cq *cq);
+int cndm_open_cq(struct cndm_cq *cq, int irqn, int size);
+void cndm_close_cq(struct cndm_cq *cq);
+
+// cndm_sq.c
+struct cndm_ring *cndm_create_sq(struct cndm_priv *priv);
+void cndm_destroy_sq(struct cndm_ring *sq);
+int cndm_open_sq(struct cndm_ring *sq, struct cndm_priv *priv, struct cndm_cq *cq, int size);
+void cndm_close_sq(struct cndm_ring *sq);
+int cndm_free_tx_buf(struct cndm_ring *sq);
 int cndm_poll_tx_cq(struct napi_struct *napi, int budget);
 int cndm_start_xmit(struct sk_buff *skb, struct net_device *ndev);
 
-// cndm_rx.c
-int cndm_free_rx_buf(struct cndm_priv *priv);
-int cndm_refill_rx_buffers(struct cndm_priv *priv);
+// cndm_rq.c
+struct cndm_ring *cndm_create_rq(struct cndm_priv *priv);
+void cndm_destroy_rq(struct cndm_ring *rq);
+int cndm_open_rq(struct cndm_ring *rq, struct cndm_priv *priv, struct cndm_cq *cq, int size);
+void cndm_close_rq(struct cndm_ring *rq);
+int cndm_free_rx_buf(struct cndm_ring *rq);
+int cndm_refill_rx_buffers(struct cndm_ring *rq);
 int cndm_poll_rx_cq(struct napi_struct *napi, int budget);
 
 #endif

@@ -12,8 +12,9 @@ cndm-y += cndm_dev.o
 cndm-y += cndm_netdev.o
 cndm-y += cndm_ethtool.o
 cndm-y += cndm_ptp.o
-cndm-y += cndm_tx.o
-cndm-y += cndm_rx.o
+cndm-y += cndm_cq.o
+cndm-y += cndm_sq.o
+cndm-y += cndm_rq.o
 
 ifneq ($(DEBUG),)
 ccflags-y += -DDEBUG
