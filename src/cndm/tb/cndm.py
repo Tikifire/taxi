@@ -115,7 +115,7 @@ class Port:
             0x00000000, # flags
             self.index, # port
             0, # cqn
-            0, # eqn
+            self.index, # eqn
             0, # pd
             self.rxcq_log_size, # size
             0, # dboffs
@@ -126,7 +126,10 @@ class Port:
             0, # rsvd
             0, # rsvd
         ))
-        print(rsp)
+
+        rsp_unpacked = struct.unpack("<HHLLLLLLLQQLLLL", rsp)
+        print(rsp_unpacked)
+        self.rx_cqn = rsp_unpacked[4]
 
         self.rxq = self.driver.pool.alloc_region(self.rxq_size*16)
         addr = self.rxq.get_absolute_address(0)
@@ -137,7 +140,7 @@ class Port:
             0x00000000, # flags
             self.index, # port
             0, # rqn
-            0, # cqn
+            self.rx_cqn, # cqn
             0, # pd
             self.rxq_log_size, # size
             0, # dboffs
@@ -148,9 +151,11 @@ class Port:
             0, # rsvd
             0, # rsvd
         ))
-        print(rsp)
 
-        self.rxq_db_offs = struct.unpack_from("<L", rsp, 7*4)[0]
+        rsp_unpacked = struct.unpack("<HHLLLLLLLQQLLLL", rsp)
+        print(rsp_unpacked)
+        self.rx_rqn = rsp_unpacked[4]
+        self.rxq_db_offs = rsp_unpacked[8]
 
         self.txcq = self.driver.pool.alloc_region(self.txcq_size*16)
         addr = self.txcq.get_absolute_address(0)
@@ -160,8 +165,8 @@ class Port:
             CNDM_CMD_OP_CREATE_CQ, # opcode
             0x00000000, # flags
             self.index, # port
-            1, # cqn
-            0, # eqn
+            0, # cqn
+            self.index, # eqn
             0, # pd
             self.txcq_log_size, # size
             0, # dboffs
@@ -172,7 +177,10 @@ class Port:
             0, # rsvd
             0, # rsvd
         ))
-        print(rsp)
+
+        rsp_unpacked = struct.unpack("<HHLLLLLLLQQLLLL", rsp)
+        print(rsp_unpacked)
+        self.tx_cqn = rsp_unpacked[4]
 
         self.txq = self.driver.pool.alloc_region(self.txq_size*16)
         addr = self.txq.get_absolute_address(0)
@@ -183,7 +191,7 @@ class Port:
             0x00000000, # flags
             self.index, # port
             0, # sqn
-            1, # cqn
+            self.tx_cqn, # cqn
             0, # pd
             self.txq_log_size, # size
             0, # dboffs
@@ -194,9 +202,11 @@ class Port:
             0, # rsvd
             0, # rsvd
         ))
-        print(rsp)
 
-        self.txq_db_offs = struct.unpack_from("<L", rsp, 7*4)[0]
+        rsp_unpacked = struct.unpack("<HHLLLLLLLQQLLLL", rsp)
+        print(rsp_unpacked)
+        self.tx_sqn = rsp_unpacked[4]
+        self.txq_db_offs = rsp_unpacked[8]
 
         await self.refill_rx_buffers()
 

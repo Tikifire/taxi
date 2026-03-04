@@ -38,7 +38,7 @@ module cndm_micro_cpl_wr
     taxi_dma_desc_if.sts_snk  dma_wr_desc_sts,
     taxi_dma_ram_if.rd_slv    dma_ram_rd,
 
-    taxi_axis_if.snk          axis_cpl[2],
+    taxi_axis_if.snk          s_axis_cpl,
     output wire logic         irq
 );
 
@@ -201,20 +201,6 @@ always_ff @(posedge clk) begin
     end
 end
 
-taxi_axis_if #(
-    .DATA_W(axis_cpl[0].DATA_W),
-    .KEEP_EN(axis_cpl[0].KEEP_EN),
-    .KEEP_W(axis_cpl[0].KEEP_W),
-    .STRB_EN(axis_cpl[0].STRB_EN),
-    .LAST_EN(axis_cpl[0].LAST_EN),
-    .ID_EN(1),
-    .ID_W(1),
-    .DEST_EN(axis_cpl[0].DEST_EN),
-    .DEST_W(axis_cpl[0].DEST_W),
-    .USER_EN(axis_cpl[0].USER_EN),
-    .USER_W(axis_cpl[0].USER_W)
-) cpl_comb();
-
 typedef enum logic [1:0] {
     STATE_IDLE,
     STATE_RX_CPL,
@@ -230,7 +216,7 @@ logic irq_reg = 1'b0;
 assign irq = irq_reg;
 
 always_ff @(posedge clk) begin
-    cpl_comb.tready <= 1'b0;
+    s_axis_cpl.tready <= 1'b0;
 
     dma_wr_desc_req.req_src_sel <= '0;
     dma_wr_desc_req.req_src_asid <= '0;
@@ -259,10 +245,10 @@ always_ff @(posedge clk) begin
         STATE_IDLE: begin
             dma_wr_desc_req.req_src_addr <= '0;
 
-            if (cpl_comb.tid == 0) begin
+            if (s_axis_cpl.tdest == 0) begin
                 dma_wr_desc_req.req_dst_addr <= txcq_base_addr_reg + 64'(16'(txcq_prod_ptr_reg & ({16{1'b1}} >> (16 - txcq_size_reg))) * 16);
                 phase_tag_reg <= !txcq_prod_ptr_reg[txcq_size_reg];
-                if (cpl_comb.tvalid && !cpl_comb.tready) begin
+                if (s_axis_cpl.tvalid && !s_axis_cpl.tready) begin
                     txcq_prod_ptr_reg <= txcq_prod_ptr_reg + 1;
                     if (txcq_en_reg) begin
                         dma_wr_desc_req.req_valid <= 1'b1;
@@ -274,7 +260,7 @@ always_ff @(posedge clk) begin
             end else begin
                 dma_wr_desc_req.req_dst_addr <= rxcq_base_addr_reg + 64'(16'(rxcq_prod_ptr_reg & ({16{1'b1}} >> (16 - rxcq_size_reg))) * 16);
                 phase_tag_reg <= !rxcq_prod_ptr_reg[rxcq_size_reg];
-                if (cpl_comb.tvalid && !cpl_comb.tready) begin
+                if (s_axis_cpl.tvalid && !s_axis_cpl.tready) begin
                     rxcq_prod_ptr_reg <= rxcq_prod_ptr_reg + 1;
                     if (rxcq_en_reg) begin
                         dma_wr_desc_req.req_valid <= 1'b1;
@@ -287,7 +273,7 @@ always_ff @(posedge clk) begin
         end
         STATE_WRITE_DATA: begin
             if (dma_wr_desc_sts.sts_valid) begin
-                cpl_comb.tready <= 1'b1;
+                s_axis_cpl.tready <= 1'b1;
                 irq_reg <= 1'b1;
                 state_reg <= STATE_IDLE;
             end
@@ -305,27 +291,6 @@ always_ff @(posedge clk) begin
     end
 end
 
-taxi_axis_arb_mux #(
-    .S_COUNT(2),
-    .UPDATE_TID(1),
-    .ARB_ROUND_ROBIN(1),
-    .ARB_LSB_HIGH_PRIO(1)
-)
-mux_inst (
-    .clk(clk),
-    .rst(rst),
-
-    /*
-     * AXI4-Stream input (sink)
-     */
-    .s_axis(axis_cpl),
-
-    /*
-     * AXI4-Stream output (source)
-     */
-    .m_axis(cpl_comb)
-);
-
 // extract parameters
 localparam SEGS = dma_ram_rd.SEGS;
 localparam SEG_ADDR_W = dma_ram_rd.SEG_ADDR_W;
@@ -335,7 +300,7 @@ localparam SEG_BE_W = dma_ram_rd.SEG_BE_W;
 if (SEGS*SEG_DATA_W < 128)
     $fatal(0, "Total segmented interface width must be at least 128 (instance %m)");
 
-wire [SEGS-1:0][SEG_DATA_W-1:0] ram_data = (SEG_DATA_W*SEGS)'({phase_tag_reg, cpl_comb.tdata[126:0]});
+wire [SEGS-1:0][SEG_DATA_W-1:0] ram_data = (SEG_DATA_W*SEGS)'({phase_tag_reg, s_axis_cpl.tdata[126:0]});
 
 for (genvar n = 0; n < SEGS; n = n + 1) begin
 

@@ -289,7 +289,7 @@ struct net_device *cndm_create_netdev(struct cndm_dev *cdev, int port)
 	cmd.flags = 0x00000000;
 	cmd.port = port;
 	cmd.qn = 0;
-	cmd.qn2 = 0;
+	cmd.qn2 = port;
 	cmd.pd = 0;
 	cmd.size = priv->rxcq_log_size;
 	cmd.dboffs = 0;
@@ -298,11 +298,13 @@ struct net_device *cndm_create_netdev(struct cndm_dev *cdev, int port)
 
 	cndm_exec_cmd(cdev, &cmd, &rsp);
 
+	priv->rx_cqn = rsp.qn;
+
 	cmd.opcode = CNDM_CMD_OP_CREATE_RQ;
 	cmd.flags = 0x00000000;
 	cmd.port = port;
 	cmd.qn = 0;
-	cmd.qn2 = 0;
+	cmd.qn2 = priv->rx_cqn;
 	cmd.pd = 0;
 	cmd.size = priv->rxq_log_size;
 	cmd.dboffs = 0;
@@ -311,13 +313,14 @@ struct net_device *cndm_create_netdev(struct cndm_dev *cdev, int port)
 
 	cndm_exec_cmd(cdev, &cmd, &rsp);
 
+	priv->rx_rqn = rsp.qn;
 	priv->rxq_db_offs = rsp.dboffs;
 
 	cmd.opcode = CNDM_CMD_OP_CREATE_CQ;
 	cmd.flags = 0x00000000;
 	cmd.port = port;
-	cmd.qn = 1;
-	cmd.qn2 = 0;
+	cmd.qn = 0;
+	cmd.qn2 = port;
 	cmd.pd = 0;
 	cmd.size = priv->txcq_log_size;
 	cmd.dboffs = 0;
@@ -326,11 +329,13 @@ struct net_device *cndm_create_netdev(struct cndm_dev *cdev, int port)
 
 	cndm_exec_cmd(cdev, &cmd, &rsp);
 
+	priv->tx_cqn = rsp.qn;
+
 	cmd.opcode = CNDM_CMD_OP_CREATE_SQ;
 	cmd.flags = 0x00000000;
 	cmd.port = port;
 	cmd.qn = 0;
-	cmd.qn2 = 0;
+	cmd.qn2 = priv->tx_cqn;
 	cmd.pd = 0;
 	cmd.size = priv->txq_log_size;
 	cmd.dboffs = 0;
@@ -339,6 +344,7 @@ struct net_device *cndm_create_netdev(struct cndm_dev *cdev, int port)
 
 	cndm_exec_cmd(cdev, &cmd, &rsp);
 
+	priv->tx_sqn = rsp.qn;
 	priv->txq_db_offs = rsp.dboffs;
 
 	netif_carrier_off(ndev);
@@ -376,33 +382,31 @@ void cndm_destroy_netdev(struct net_device *ndev)
 	struct cndm_cmd_queue cmd;
 	struct cndm_cmd_queue rsp;
 
+	cmd.opcode = CNDM_CMD_OP_DESTROY_SQ;
+	cmd.flags = 0x00000000;
+	cmd.port = ndev->dev_port;
+	cmd.qn = priv->tx_sqn;
+
+	cndm_exec_cmd(cdev, &cmd, &rsp);
+
 	cmd.opcode = CNDM_CMD_OP_DESTROY_CQ;
 	cmd.flags = 0x00000000;
 	cmd.port = ndev->dev_port;
-	cmd.qn = 0;
+	cmd.qn = priv->tx_cqn;
 
 	cndm_exec_cmd(cdev, &cmd, &rsp);
 
 	cmd.opcode = CNDM_CMD_OP_DESTROY_RQ;
 	cmd.flags = 0x00000000;
 	cmd.port = ndev->dev_port;
-	cmd.qn = 0;
+	cmd.qn = priv->rx_rqn;
 
 	cndm_exec_cmd(cdev, &cmd, &rsp);
-
-	priv->rxq_db_offs = rsp.dboffs;
 
 	cmd.opcode = CNDM_CMD_OP_DESTROY_CQ;
 	cmd.flags = 0x00000000;
 	cmd.port = ndev->dev_port;
-	cmd.qn = 1;
-
-	cndm_exec_cmd(cdev, &cmd, &rsp);
-
-	cmd.opcode = CNDM_CMD_OP_DESTROY_SQ;
-	cmd.flags = 0x00000000;
-	cmd.port = ndev->dev_port;
-	cmd.qn = 0;
+	cmd.qn = priv->rx_cqn;
 
 	cndm_exec_cmd(cdev, &cmd, &rsp);
 

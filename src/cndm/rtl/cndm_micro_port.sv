@@ -261,26 +261,20 @@ wr_dma_mux_inst (
     .client_ram_rd(dma_ram_rd_int)
 );
 
+// descriptor fetch
 wire [1:0] desc_req;
 
 taxi_axis_if #(
     .DATA_W(16*8),
     .KEEP_EN(1),
     .LAST_EN(1),
-    .ID_EN(0),
-    .DEST_EN(1), // TODO
+    .ID_EN(1),
+    .ID_W(1),
+    .DEST_EN(1),
+    .DEST_W(8),
     .USER_EN(1),
     .USER_W(1)
-) axis_desc[2]();
-
-taxi_axis_if #(
-    .DATA_W(16*8),
-    .KEEP_EN(1),
-    .LAST_EN(1),
-    .ID_EN(1), // TODO
-    .DEST_EN(0),
-    .USER_EN(0)
-) axis_cpl[2]();
+) axis_desc();
 
 cndm_micro_desc_rd
 desc_rd_inst (
@@ -306,7 +300,91 @@ desc_rd_inst (
     .dma_ram_wr(dma_ram_wr_int[0]),
 
     .desc_req(desc_req),
-    .axis_desc(axis_desc)
+    .m_axis_desc(axis_desc)
+);
+
+// desc demux
+taxi_axis_if #(
+    .DATA_W(axis_desc.DATA_W),
+    .KEEP_EN(axis_desc.KEEP_EN),
+    .KEEP_W(axis_desc.KEEP_W),
+    .LAST_EN(axis_desc.LAST_EN),
+    .ID_EN(axis_desc.ID_EN),
+    .ID_W(axis_desc.ID_W),
+    .DEST_EN(axis_desc.DEST_EN),
+    .DEST_W(axis_desc.DEST_W),
+    .USER_EN(axis_desc.USER_EN),
+    .USER_W(axis_desc.USER_W)
+) axis_desc_txrx[2]();
+
+taxi_axis_demux #(
+    .M_COUNT(2),
+    .TID_ROUTE(1)
+)
+desc_demux_inst (
+    .clk(clk),
+    .rst(rst),
+
+    /*
+     * AXI4-Stream input (sink)
+     */
+    .s_axis(axis_desc),
+
+    /*
+     * AXI4-Stream output (source)
+     */
+    .m_axis(axis_desc_txrx),
+
+    /*
+     * Control
+     */
+    .enable(1'b1),
+    .drop(1'b0),
+    .select('0)
+);
+
+// completion write
+taxi_axis_if #(
+    .DATA_W(16*8),
+    .KEEP_EN(1),
+    .LAST_EN(1),
+    .ID_EN(0),
+    .DEST_EN(1),
+    .DEST_W(8),
+    .USER_EN(0)
+) axis_cpl();
+
+taxi_axis_if #(
+    .DATA_W(axis_cpl.DATA_W),
+    .KEEP_EN(axis_cpl.KEEP_EN),
+    .KEEP_W(axis_cpl.KEEP_W),
+    .LAST_EN(axis_cpl.LAST_EN),
+    .ID_EN(axis_cpl.ID_EN),
+    .ID_W(axis_cpl.ID_W),
+    .DEST_EN(axis_cpl.DEST_EN),
+    .DEST_W(axis_cpl.DEST_W),
+    .USER_EN(axis_cpl.USER_EN),
+    .USER_W(axis_cpl.USER_W)
+) axis_cpl_txrx[2]();
+
+taxi_axis_arb_mux #(
+    .S_COUNT(2),
+    .ARB_ROUND_ROBIN(1),
+    .ARB_LSB_HIGH_PRIO(1)
+)
+cpl_mux_inst (
+    .clk(clk),
+    .rst(rst),
+
+    /*
+     * AXI4-Stream input (sink)
+     */
+    .s_axis(axis_cpl_txrx),
+
+    /*
+     * AXI4-Stream output (source)
+     */
+    .m_axis(axis_cpl)
 );
 
 cndm_micro_cpl_wr
@@ -332,10 +410,11 @@ cpl_wr_inst (
     .dma_wr_desc_sts(dma_wr_desc_int[0]),
     .dma_ram_rd(dma_ram_rd_int[0]),
 
-    .axis_cpl(axis_cpl),
+    .s_axis_cpl(axis_cpl),
     .irq(irq)
 );
 
+// TX path
 taxi_axis_if #(
     .DATA_W(mac_axis_tx.DATA_W),
     .USER_EN(1),
@@ -470,12 +549,13 @@ tx_inst (
     .dma_ram_wr(dma_ram_wr_int[1]),
 
     .desc_req(desc_req[0]),
-    .axis_desc(axis_desc[0]),
+    .s_axis_desc(axis_desc_txrx[0]),
     .tx_data(mac_tx_int),
     .tx_cpl(mac_tx_cpl_int),
-    .axis_cpl(axis_cpl[0])
+    .m_axis_cpl(axis_cpl_txrx[0])
 );
 
+// RX path
 taxi_axis_if #(
     .DATA_W(mac_axis_rx.DATA_W),
     .USER_EN(1),
@@ -554,8 +634,8 @@ rx_inst (
 
     .rx_data(mac_rx_int),
     .desc_req(desc_req[1]),
-    .axis_desc(axis_desc[1]),
-    .axis_cpl(axis_cpl[1])
+    .s_axis_desc(axis_desc_txrx[1]),
+    .m_axis_cpl(axis_cpl_txrx[1])
 );
 
 endmodule

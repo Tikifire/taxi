@@ -39,7 +39,7 @@ module cndm_micro_desc_rd
     taxi_dma_ram_if.wr_slv    dma_ram_wr,
 
     input  wire logic [1:0]   desc_req,
-    taxi_axis_if.src          axis_desc[2]
+    taxi_axis_if.src          m_axis_desc
 );
 
 localparam AXIL_ADDR_W = s_axil_ctrl_wr.ADDR_W;
@@ -52,10 +52,12 @@ localparam RAM_ADDR_W = 16;
 
 logic         txq_en_reg = '0;
 logic [3:0]   txq_size_reg = '0;
+logic [7:0]   txq_cqn_reg = '0;
 logic [63:0]  txq_base_addr_reg = '0;
 logic [15:0]  txq_prod_reg = '0;
 logic         rxq_en_reg = '0;
 logic [3:0]   rxq_size_reg = '0;
+logic [7:0]   rxq_cqn_reg = '0;
 logic [63:0]  rxq_base_addr_reg = '0;
 logic [15:0]  rxq_prod_reg = '0;
 
@@ -167,6 +169,7 @@ always_ff @(posedge clk) begin
                 10'h000: begin
                     txq_en_reg <= s_apb_dp_ctrl.pwdata[0];
                     txq_size_reg <= s_apb_dp_ctrl.pwdata[19:16];
+                    txq_cqn_reg <= s_apb_dp_ctrl.pwdata[31:24];
                 end
                 10'h004: txq_prod_reg <= s_apb_dp_ctrl.pwdata[15:0];
                 10'h008: txq_base_addr_reg[31:0] <= s_apb_dp_ctrl.pwdata;
@@ -175,6 +178,7 @@ always_ff @(posedge clk) begin
                 10'h100: begin
                     rxq_en_reg <= s_apb_dp_ctrl.pwdata[0];
                     rxq_size_reg <= s_apb_dp_ctrl.pwdata[19:16];
+                    rxq_cqn_reg <= s_apb_dp_ctrl.pwdata[31:24];
                 end
                 10'h104: rxq_prod_reg <= s_apb_dp_ctrl.pwdata[15:0];
                 10'h108: rxq_base_addr_reg[31:0] <= s_apb_dp_ctrl.pwdata;
@@ -187,6 +191,7 @@ always_ff @(posedge clk) begin
             10'h000: begin
                 s_apb_dp_ctrl_prdata_reg[0] <= txq_en_reg;
                 s_apb_dp_ctrl_prdata_reg[19:16] <= txq_size_reg;
+                s_apb_dp_ctrl_prdata_reg[31:24] <= txq_cqn_reg;
             end
             10'h004: begin
                 s_apb_dp_ctrl_prdata_reg[15:0] <= txq_prod_reg;
@@ -198,6 +203,7 @@ always_ff @(posedge clk) begin
             10'h100: begin
                 s_apb_dp_ctrl_prdata_reg[0] <= rxq_en_reg;
                 s_apb_dp_ctrl_prdata_reg[19:16] <= rxq_size_reg;
+                s_apb_dp_ctrl_prdata_reg[31:24] <= rxq_cqn_reg;
             end
             10'h104: begin
                 s_apb_dp_ctrl_prdata_reg[15:0] <= rxq_prod_reg;
@@ -231,11 +237,12 @@ taxi_dma_desc_if #(
     .IMM_EN(1'b0),
     .LEN_W(5),
     .TAG_W(1),
-    .ID_EN(0),
-    .DEST_EN(1),
-    .DEST_W(1),
-    .USER_EN(1),
-    .USER_W(1)
+    .ID_EN(m_axis_desc.ID_EN),
+    .ID_W(m_axis_desc.ID_W),
+    .DEST_EN(m_axis_desc.DEST_EN),
+    .DEST_W(m_axis_desc.DEST_W),
+    .USER_EN(m_axis_desc.USER_EN),
+    .USER_W(m_axis_desc.USER_W)
 ) dma_desc();
 
 typedef enum logic [1:0] {
@@ -274,7 +281,6 @@ always_ff @(posedge clk) begin
     dma_desc.req_imm_en <= '0;
     dma_desc.req_len <= 16;
     dma_desc.req_tag <= '0;
-    dma_desc.req_id <= '0;
     dma_desc.req_user <= '0;
     dma_desc.req_valid <= dma_desc.req_valid && !dma_desc.req_ready;
 
@@ -292,7 +298,8 @@ always_ff @(posedge clk) begin
         STATE_IDLE: begin
             if (desc_req_reg[1]) begin
                 dma_rd_desc_req.req_src_addr <= rxq_base_addr_reg + 64'(16'(rxq_cons_ptr_reg & ({16{1'b1}} >> (16 - rxq_size_reg))) * 16);
-                dma_desc.req_dest <= 1'b1;
+                dma_desc.req_id <= 1'b1;
+                dma_desc.req_dest <= rxq_cqn_reg;
                 desc_req_reg[1] <= 1'b0;
                 if (rxq_cons_ptr_reg == rxq_prod_reg || !rxq_en_reg) begin
                     dma_desc.req_user <= 1'b1;
@@ -306,7 +313,8 @@ always_ff @(posedge clk) begin
                 end
             end else if (desc_req_reg[0]) begin
                 dma_rd_desc_req.req_src_addr <= txq_base_addr_reg + 64'(16'(txq_cons_ptr_reg & ({16{1'b1}} >> (16 - txq_size_reg))) * 16);
-                dma_desc.req_dest <= 1'b0;
+                dma_desc.req_id <= 1'b0;
+                dma_desc.req_dest <= txq_cqn_reg;
                 desc_req_reg[0] <= 1'b0;
                 if (txq_cons_ptr_reg == txq_prod_reg || !txq_en_reg) begin
                     dma_desc.req_user <= 1'b1;
@@ -367,19 +375,6 @@ ram_inst (
     .dma_ram_rd(dma_ram_rd)
 );
 
-taxi_axis_if #(
-    .DATA_W(axis_desc[0].DATA_W),
-    .KEEP_EN(axis_desc[0].KEEP_EN),
-    .KEEP_W(axis_desc[0].KEEP_W),
-    .LAST_EN(axis_desc[0].LAST_EN),
-    .ID_EN(axis_desc[0].ID_EN),
-    .ID_W(axis_desc[0].ID_W),
-    .DEST_EN(1),
-    .DEST_W(1),
-    .USER_EN(axis_desc[0].USER_EN),
-    .USER_W(axis_desc[0].USER_W)
-) m_axis_rd_data();
-
 taxi_dma_client_axis_source
 dma_inst (
     .clk(clk),
@@ -394,7 +389,7 @@ dma_inst (
     /*
      * AXI stream read data output
      */
-    .m_axis_rd_data(m_axis_rd_data),
+    .m_axis_rd_data(m_axis_desc),
 
     /*
      * RAM interface
@@ -405,32 +400,6 @@ dma_inst (
      * Configuration
      */
     .enable(1'b1)
-);
-
-taxi_axis_demux #(
-    .M_COUNT(2),
-    .TDEST_ROUTE(1)
-)
-demux_inst (
-    .clk(clk),
-    .rst(rst),
-
-    /*
-     * AXI4-Stream input (sink)
-     */
-    .s_axis(m_axis_rd_data),
-
-    /*
-     * AXI4-Stream output (source)
-     */
-    .m_axis(axis_desc),
-
-    /*
-     * Control
-     */
-    .enable(1'b1),
-    .drop(1'b0),
-    .select('0)
 );
 
 endmodule

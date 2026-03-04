@@ -38,10 +38,10 @@ module cndm_micro_tx #(
     taxi_dma_ram_if.wr_slv    dma_ram_wr,
 
     output wire logic         desc_req,
-    taxi_axis_if.snk          axis_desc,
+    taxi_axis_if.snk          s_axis_desc,
     taxi_axis_if.src          tx_data,
     taxi_axis_if.snk          tx_cpl,
-    taxi_axis_if.src          axis_cpl
+    taxi_axis_if.src          m_axis_cpl
 );
 
 localparam RAM_ADDR_W = 16;
@@ -140,7 +140,7 @@ end
 always_ff @(posedge clk) begin
     desc_req_reg <= 1'b0;
 
-    axis_desc.tready <= 1'b0;
+    s_axis_desc.tready <= 1'b0;
 
     dma_rd_desc_req.req_src_sel <= '0;
     dma_rd_desc_req.req_src_asid <= '0;
@@ -167,12 +167,11 @@ always_ff @(posedge clk) begin
     dma_desc.req_user <= '0;
     dma_desc.req_valid <= dma_desc.req_valid && !dma_desc.req_ready;
 
-    axis_cpl.tkeep <= '0;
-    axis_cpl.tid <= '0;
-    axis_cpl.tdest <= '0;
-    axis_cpl.tuser <= '0;
-    axis_cpl.tlast <= 1'b1;
-    axis_cpl.tvalid <= axis_cpl.tvalid && !axis_cpl.tready;
+    m_axis_cpl.tkeep <= '0;
+    m_axis_cpl.tid <= '0;
+    m_axis_cpl.tuser <= '0;
+    m_axis_cpl.tlast <= 1'b1;
+    m_axis_cpl.tvalid <= m_axis_cpl.tvalid && !m_axis_cpl.tready;
 
     case (state_reg)
         STATE_IDLE: begin
@@ -180,19 +179,21 @@ always_ff @(posedge clk) begin
             state_reg <= STATE_READ_DESC;
         end
         STATE_READ_DESC: begin
-            axis_desc.tready <= 1'b1;
+            s_axis_desc.tready <= 1'b1;
 
-            dma_rd_desc_req.req_src_addr <= axis_desc.tdata[127:64];
+            dma_rd_desc_req.req_src_addr <= s_axis_desc.tdata[127:64];
             dma_rd_desc_req.req_dst_addr <= '0;
-            dma_rd_desc_req.req_len <= 20'(axis_desc.tdata[47:32]);
+            dma_rd_desc_req.req_len <= 20'(s_axis_desc.tdata[47:32]);
 
             dma_desc.req_src_addr <= '0;
-            dma_desc.req_len <= axis_desc.tdata[47:32];
+            dma_desc.req_len <= s_axis_desc.tdata[47:32];
 
-            axis_cpl.tdata[47:32] <= axis_desc.tdata[47:32];
+            m_axis_cpl.tdata[47:32] <= s_axis_desc.tdata[47:32];
 
-            if (axis_desc.tvalid && axis_desc.tready) begin
-                if (axis_desc.tuser) begin
+            m_axis_cpl.tdest <= s_axis_desc.tdest; // CQN
+
+            if (s_axis_desc.tvalid && s_axis_desc.tready) begin
+                if (s_axis_desc.tuser) begin
                     // failed to read desc
                     state_reg <= STATE_IDLE;
                 end else begin
@@ -208,11 +209,11 @@ always_ff @(posedge clk) begin
             end
         end
         STATE_TX_DATA: begin
-            axis_cpl.tdata[127:112] <= tx_cpl_ptp_ts[63:48]; // sec
-            axis_cpl.tdata[95:64]   <= tx_cpl_ptp_ts[47:16]; // ns
-            axis_cpl.tdata[111:96]  <= tx_cpl_ptp_ts[15:0];  // fns
+            m_axis_cpl.tdata[127:112] <= tx_cpl_ptp_ts[63:48]; // sec
+            m_axis_cpl.tdata[95:64]   <= tx_cpl_ptp_ts[47:16]; // ns
+            m_axis_cpl.tdata[111:96]  <= tx_cpl_ptp_ts[15:0];  // fns
             if (tx_cpl_valid) begin
-                axis_cpl.tvalid <= 1'b1;
+                m_axis_cpl.tvalid <= 1'b1;
                 state_reg <= STATE_IDLE;
             end
         end

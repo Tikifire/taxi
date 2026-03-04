@@ -108,6 +108,7 @@ struct cndm_priv {
 	u32 txq_prod;
 	u32 txq_cons;
 	u32 txq_db_offs;
+	u32 tx_sqn;
 
 	size_t rxq_region_len;
 	void *rxq_region;
@@ -119,6 +120,7 @@ struct cndm_priv {
 	u32 rxq_prod;
 	u32 rxq_cons;
 	u32 rxq_db_offs;
+	u32 rx_rqn;
 
 	size_t txcq_region_len;
 	void *txcq_region;
@@ -129,6 +131,7 @@ struct cndm_priv {
 	u32 txcq_mask;
 	u32 txcq_prod;
 	u32 txcq_cons;
+	u32 tx_cqn;
 
 	size_t rxcq_region_len;
 	void *rxcq_region;
@@ -139,6 +142,7 @@ struct cndm_priv {
 	u32 rxcq_mask;
 	u32 rxcq_prod;
 	u32 rxcq_cons;
+	u32 rx_cqn;
 };
 
 // cndm_cmd.c
