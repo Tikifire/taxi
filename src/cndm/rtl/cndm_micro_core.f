@@ -15,7 +15,7 @@ cndm_micro_cpl_wr.sv
 ../lib/taxi/src/apb/rtl/taxi_apb_if.sv
 ../lib/taxi/src/apb/rtl/taxi_apb_interconnect.sv
 ../lib/taxi/src/axi/rtl/taxi_axil_interconnect_1s.f
-../lib/taxi/src/axis/rtl/taxi_axis_async_fifo.f
+../lib/taxi/src/axis/rtl/taxi_axis_async_fifo_adapter.f
 ../lib/taxi/src/axis/rtl/taxi_axis_arb_mux.f
 ../lib/taxi/src/axis/rtl/taxi_axis_demux.sv
 ../lib/taxi/src/ptp/rtl/taxi_ptp_td_phc_apb.f

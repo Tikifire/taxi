@@ -426,12 +426,12 @@ cpl_wr_inst (
 
 // TX path
 taxi_axis_if #(
-    .DATA_W(mac_axis_tx.DATA_W),
+    .DATA_W(mac_axis_tx.DATA_W*2),
     .USER_EN(1),
     .USER_W(1)
 ) mac_tx_int();
 
-taxi_axis_async_fifo #(
+taxi_axis_async_fifo_adapter #(
     .DEPTH(16384),
     .RAM_PIPELINE(2),
     .FRAME_FIFO(1),
@@ -567,13 +567,13 @@ tx_inst (
 
 // RX path
 taxi_axis_if #(
-    .DATA_W(mac_axis_rx.DATA_W),
+    .DATA_W(mac_axis_rx.DATA_W*2),
     .USER_EN(1),
     .USER_W(mac_axis_rx.USER_W)
 ) mac_rx_int();
 
-taxi_axis_async_fifo #(
-    .DEPTH(16384),
+taxi_axis_async_fifo_adapter #(
+    .DEPTH(32768),
     .RAM_PIPELINE(2),
     .FRAME_FIFO(1),
     .USER_BAD_FRAME_VALUE(1'b1),
