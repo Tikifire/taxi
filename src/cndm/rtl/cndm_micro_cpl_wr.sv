@@ -59,6 +59,7 @@ cndm_micro_queue_state #(
     .QN_W(CQN_W),
     .DQN_W(CQN_W), // TODO
     .IS_CQ(1),
+    .QTYPE_EN(0),
     .QE_SIZE(16),
     .DMA_ADDR_W(DMA_ADDR_W)
 )
@@ -81,6 +82,7 @@ cq_mgr_inst (
      * Queue management interface
      */
     .req_qn(cq_req_cqn_reg),
+    .req_qtype('0),
     .req_valid(cq_req_valid_reg),
     .req_ready(cq_req_ready),
     .rsp_qn(),

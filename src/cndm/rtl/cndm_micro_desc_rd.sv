@@ -49,7 +49,15 @@ localparam DMA_ADDR_W = dma_rd_desc_req.SRC_ADDR_W;
 
 localparam RAM_ADDR_W = 16;
 
+typedef enum logic [2:0] {
+    QTYPE_EQ,
+    QTYPE_CQ,
+    QTYPE_SQ,
+    QTYPE_RQ
+} qtype_t;
+
 logic [WQN_W-1:0]       wq_req_wqn_reg = '0;
+logic [2:0]             wq_req_qtype_reg = '0;
 logic                   wq_req_valid_reg = 1'b0;
 logic                   wq_req_ready;
 logic [CQN_W-1:0]       wq_rsp_cqn;
@@ -62,6 +70,7 @@ cndm_micro_queue_state #(
     .QN_W(WQN_W),
     .DQN_W(CQN_W),
     .IS_CQ(0),
+    .QTYPE_EN(1),
     .QE_SIZE(16),
     .DMA_ADDR_W(DMA_ADDR_W)
 )
@@ -84,6 +93,7 @@ wq_mgr_inst (
      * Queue management interface
      */
     .req_qn(wq_req_wqn_reg),
+    .req_qtype(wq_req_qtype_reg),
     .req_valid(wq_req_valid_reg),
     .req_ready(wq_req_ready),
     .rsp_qn(),
@@ -162,12 +172,14 @@ always_ff @(posedge clk) begin
             if (desc_req_reg[1]) begin
                 desc_req_reg[1] <= 1'b0;
                 wq_req_wqn_reg <= 1;
+                wq_req_qtype_reg <= QTYPE_RQ;
                 wq_req_valid_reg <= 1'b1;
                 dma_desc.req_id <= 1'b1;
                 state_reg <= STATE_QUERY_WQ;
             end else if (desc_req_reg[0]) begin
                 desc_req_reg[0] <= 1'b0;
                 wq_req_wqn_reg <= 0;
+                wq_req_qtype_reg <= QTYPE_SQ;
                 wq_req_valid_reg <= 1'b1;
                 dma_desc.req_id <= 1'b0;
                 state_reg <= STATE_QUERY_WQ;

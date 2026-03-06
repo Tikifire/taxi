@@ -81,6 +81,13 @@ typedef enum logic [15:0] {
     CMD_OP_DESTROY_QP = 16'h0243
 } cmd_opcode_t;
 
+typedef enum logic [2:0] {
+    QTYPE_EQ,
+    QTYPE_CQ,
+    QTYPE_SQ,
+    QTYPE_RQ
+} qtype_t;
+
 typedef enum logic [4:0] {
     STATE_IDLE,
     STATE_START,
@@ -162,6 +169,7 @@ logic [31:0] flags_reg = '0, flags_next;
 logic [15:0] port_reg = '0, port_next;
 logic [23:0] qn_reg = '0, qn_next;
 logic [23:0] qn2_reg = '0, qn2_next;
+logic [2:0] qtype_reg = '0, qtype_next;
 
 logic [3:0] cmd_ptr_reg = '0, cmd_ptr_next;
 logic [DP_APB_ADDR_W-1:0] dp_ptr_reg = '0, dp_ptr_next;
@@ -201,6 +209,7 @@ always_comb begin
     port_next = port_reg;
     qn_next = qn_reg;
     qn2_next = qn2_reg;
+    qtype_next = qtype_reg;
 
     cmd_ptr_next = cmd_ptr_reg;
     dp_ptr_next = dp_ptr_reg;
@@ -272,6 +281,7 @@ always_comb begin
                 CMD_OP_CREATE_CQ:
                 begin
                     cnt_next = 2**CQN_W-1;
+                    qtype_next = QTYPE_CQ;
                     dp_ptr_next = DP_APB_ADDR_W'({port_reg, 16'd0} | 'h8000) + DP_APB_ADDR_W'(PORT_BASE_ADDR_DP);
                     host_ptr_next = 32'({port_reg, 16'd0} | 'h8000) + PORT_BASE_ADDR_HOST;
                 end
@@ -279,6 +289,7 @@ always_comb begin
                 CMD_OP_QUERY_CQ,
                 CMD_OP_DESTROY_CQ:
                 begin
+                    qtype_next = QTYPE_CQ;
                     dp_ptr_next = DP_APB_ADDR_W'({port_reg, 16'd0} | 'h8000 | {qn_reg, 5'd00}) + DP_APB_ADDR_W'(PORT_BASE_ADDR_DP);
                     host_ptr_next = 32'({port_reg, 16'd0} | 'h8000 | {qn_reg, 5'd00}) + PORT_BASE_ADDR_HOST;
                 end
@@ -286,6 +297,7 @@ always_comb begin
                 CMD_OP_CREATE_SQ:
                 begin
                     cnt_next = 0;
+                    qtype_next = QTYPE_SQ;
                     dp_ptr_next = DP_APB_ADDR_W'({port_reg, 16'd0} | 'h0000) + DP_APB_ADDR_W'(PORT_BASE_ADDR_DP);
                     host_ptr_next = 32'({port_reg, 16'd0} | 'h0000) + PORT_BASE_ADDR_HOST;
                 end
@@ -293,6 +305,7 @@ always_comb begin
                 CMD_OP_QUERY_SQ,
                 CMD_OP_DESTROY_SQ:
                 begin
+                    qtype_next = QTYPE_SQ;
                     dp_ptr_next = DP_APB_ADDR_W'({port_reg, 16'd0} | 'h0000) + DP_APB_ADDR_W'(PORT_BASE_ADDR_DP);
                     host_ptr_next = 32'({port_reg, 16'd0} | 'h0000) + PORT_BASE_ADDR_HOST;
                 end
@@ -300,6 +313,7 @@ always_comb begin
                 CMD_OP_CREATE_RQ:
                 begin
                     cnt_next = 0;
+                    qtype_next = QTYPE_RQ;
                     dp_ptr_next = DP_APB_ADDR_W'({port_reg, 16'd0} | 'h0020) + DP_APB_ADDR_W'(PORT_BASE_ADDR_DP);
                     host_ptr_next = 32'({port_reg, 16'd0} | 'h0020) + PORT_BASE_ADDR_HOST;
                 end
@@ -307,6 +321,7 @@ always_comb begin
                 CMD_OP_QUERY_RQ,
                 CMD_OP_DESTROY_RQ:
                 begin
+                    qtype_next = QTYPE_RQ;
                     dp_ptr_next = DP_APB_ADDR_W'({port_reg, 16'd0} | 'h0020) + DP_APB_ADDR_W'(PORT_BASE_ADDR_DP);
                     host_ptr_next = 32'({port_reg, 16'd0} | 'h0020) + PORT_BASE_ADDR_HOST;
                 end
@@ -600,6 +615,7 @@ always_comb begin
                 m_apb_dp_ctrl_pwrite_next = 1'b1;
                 m_apb_dp_ctrl_pwdata_next = '0;
                 m_apb_dp_ctrl_pwdata_next[19:16] = cmd_ram_rd_data[3:0];
+                m_apb_dp_ctrl_pwdata_next[23:20] = 4'(qtype_reg);
                 m_apb_dp_ctrl_pwdata_next[0] = 1'b1;
                 m_apb_dp_ctrl_pstrb_next = '1;
 
@@ -855,6 +871,7 @@ always_ff @(posedge clk) begin
     port_reg <= port_next;
     qn_reg <= qn_next;
     qn2_reg <= qn2_next;
+    qtype_reg <= qtype_next;
 
     cmd_ptr_reg <= cmd_ptr_next;
     dp_ptr_reg <= dp_ptr_next;

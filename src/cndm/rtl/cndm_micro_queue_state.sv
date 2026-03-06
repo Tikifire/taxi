@@ -19,6 +19,7 @@ module cndm_micro_queue_state #(
     parameter QN_W = 5,
     parameter DQN_W = 5,
     parameter logic IS_CQ = 1'b0,
+    parameter logic QTYPE_EN = !IS_CQ,
     parameter QE_SIZE = 16,
     parameter DMA_ADDR_W = 64
 )
@@ -41,6 +42,7 @@ module cndm_micro_queue_state #(
      * Queue management interface
      */
      input  wire logic [QN_W-1:0]        req_qn,
+     input  wire logic [2:0]             req_qtype,
      input  wire logic                   req_valid,
      output wire logic                   req_ready,
      output wire logic [QN_W-1:0]        rsp_qn,
@@ -130,6 +132,8 @@ assign rsp_valid = rsp_valid_reg;
 
 logic [2**QN_W-1:0] queue_enable_reg = '0;
 (* ram_style = "distributed", ramstyle = "no_rw_check, mlab" *)
+logic [2:0] queue_mem_qtype[2**QN_W] = '{default: '0};
+(* ram_style = "distributed", ramstyle = "no_rw_check, mlab" *)
 logic [DQN_W-1:0] queue_mem_dqn[2**QN_W] = '{default: '0};
 (* ram_style = "distributed", ramstyle = "no_rw_check, mlab" *)
 logic [3:0] queue_mem_log_size[2**QN_W] = '{default: '0};
@@ -144,6 +148,7 @@ logic queue_mem_wr_en;
 logic [QN_W-1:0] queue_mem_addr;
 
 wire queue_mem_rd_enable = queue_enable_reg[queue_mem_addr];
+wire [2:0] queue_mem_rd_qtype = queue_mem_qtype[queue_mem_addr];
 wire [DQN_W-1:0] queue_mem_rd_dqn = queue_mem_dqn[queue_mem_addr];
 wire [3:0] queue_mem_rd_log_size = queue_mem_log_size[queue_mem_addr];
 wire [DMA_ADDR_W-1:0] queue_mem_rd_base_addr = queue_mem_base_addr[queue_mem_addr];
@@ -151,6 +156,7 @@ wire [PTR_W-1:0] queue_mem_rd_prod_ptr = queue_mem_prod_ptr[queue_mem_addr];
 wire [PTR_W-1:0] queue_mem_rd_cons_ptr = queue_mem_cons_ptr[queue_mem_addr];
 
 logic queue_mem_wr_enable;
+logic [2:0] queue_mem_wr_qtype;
 logic [DQN_W-1:0] queue_mem_wr_dqn;
 logic [3:0] queue_mem_wr_log_size;
 logic [DMA_ADDR_W-1:0] queue_mem_wr_base_addr;
@@ -181,6 +187,7 @@ always_comb begin
     queue_mem_addr = '0;
 
     queue_mem_wr_enable = queue_mem_rd_enable;
+    queue_mem_wr_qtype = queue_mem_rd_qtype;
     queue_mem_wr_dqn = queue_mem_rd_dqn;
     queue_mem_wr_log_size = queue_mem_rd_log_size;
     queue_mem_wr_base_addr = queue_mem_rd_base_addr;
@@ -230,6 +237,7 @@ always_comb begin
                 3'd0: begin
                     queue_mem_wr_enable = s_apb_dp_ctrl.pwdata[0];
                     queue_mem_wr_log_size = s_apb_dp_ctrl.pwdata[19:16];
+                    queue_mem_wr_qtype = 3'(s_apb_dp_ctrl.pwdata[23:20]);
                 end
                 3'd1: queue_mem_wr_dqn = s_apb_dp_ctrl.pwdata[DQN_W-1:0];
                 3'd2: queue_mem_wr_prod_ptr = s_apb_dp_ctrl.pwdata[15:0];
@@ -244,6 +252,7 @@ always_comb begin
             3'd0: begin
                 s_apb_dp_ctrl_prdata_next[0] = queue_mem_rd_enable;
                 s_apb_dp_ctrl_prdata_next[19:16] = queue_mem_rd_log_size;
+                s_apb_dp_ctrl_prdata_next[23:20] = 4'(queue_mem_rd_qtype);
             end
             3'd1: s_apb_dp_ctrl_prdata_next = 32'(queue_mem_rd_dqn);
             3'd2: s_apb_dp_ctrl_prdata_next[15:0] = queue_mem_rd_prod_ptr;
@@ -261,14 +270,15 @@ always_comb begin
 
         rsp_qn_next = req_qn;
         rsp_dqn_next = queue_mem_rd_dqn;
+        rsp_error_next = !queue_mem_rd_enable || (QTYPE_EN && req_qtype != queue_mem_rd_qtype);
         if (IS_CQ) begin
             rsp_addr_next = queue_mem_rd_base_addr + DMA_ADDR_W'(16'(queue_mem_rd_prod_ptr & ({16{1'b1}} >> (16 - queue_mem_rd_log_size))) * QE_SIZE);
             rsp_phase_tag_next = !queue_mem_rd_prod_ptr[queue_mem_rd_log_size];
-            rsp_error_next = !queue_mem_rd_enable;
             queue_mem_wr_prod_ptr = queue_mem_rd_prod_ptr + 1;
         end else begin
             rsp_addr_next = queue_mem_rd_base_addr + DMA_ADDR_W'(16'(queue_mem_rd_cons_ptr & ({16{1'b1}} >> (16 - queue_mem_rd_log_size))) * QE_SIZE);
-            rsp_error_next = !queue_mem_rd_enable || queue_mem_rd_prod_ptr == queue_mem_rd_cons_ptr;
+            if (queue_mem_rd_prod_ptr == queue_mem_rd_cons_ptr)
+                rsp_error_next = 1'b1;
             queue_mem_wr_cons_ptr = queue_mem_rd_cons_ptr + 1;
         end
         rsp_valid_next = 1'b1;
@@ -301,6 +311,7 @@ always @(posedge clk) begin
 
     if (queue_mem_wr_en) begin
         queue_enable_reg[queue_mem_addr] <= queue_mem_wr_enable;
+        queue_mem_qtype[queue_mem_addr] <= queue_mem_wr_qtype;
         queue_mem_dqn[queue_mem_addr] <= queue_mem_wr_dqn;
         queue_mem_log_size[queue_mem_addr] <= queue_mem_wr_log_size;
         queue_mem_base_addr[queue_mem_addr] <= queue_mem_wr_base_addr;
