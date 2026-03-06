@@ -4,6 +4,7 @@ cndm_micro_dp_mgr.sv
 cndm_micro_port.sv
 cndm_micro_rx.sv
 cndm_micro_tx.sv
+cndm_micro_queue_state.sv
 cndm_micro_desc_rd.sv
 cndm_micro_cpl_wr.sv
 ../lib/taxi/src/prim/rtl/taxi_ram_2rw_1c.sv

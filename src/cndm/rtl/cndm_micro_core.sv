@@ -36,6 +36,9 @@ module cndm_micro_core #(
     // Structural configuration
     parameter PORTS = 2,
 
+    // Queue configuration
+    parameter CQN_W = 5,
+
     // PTP configuration
     parameter logic PTP_TS_EN = 1'b1,
     parameter logic PTP_TS_FMT_TOD = 1'b0,
@@ -308,8 +311,12 @@ apb_dp_ctrl();
 
 cndm_micro_dp_mgr #(
     .PORTS(PORTS),
+
+    .CQN_W(CQN_W),
+
     .PTP_EN(PTP_TS_EN),
     .PTP_BASE_ADDR_DP(0),
+
     .PORT_BASE_ADDR_DP(PORT_BASE_ADDR_DP),
     .PORT_BASE_ADDR_HOST(PORT_BASE_ADDR_HOST)
 )
@@ -490,6 +497,10 @@ dma_mux_inst (
 for (genvar p = 0; p < PORTS; p = p + 1) begin : port
 
     cndm_micro_port #(
+        // Queue configuration
+        .CQN_W(CQN_W),
+
+        // PTP configuration
         .PTP_TS_EN(PTP_TS_EN),
         .PTP_TS_FMT_TOD(PTP_TS_FMT_TOD)
     )

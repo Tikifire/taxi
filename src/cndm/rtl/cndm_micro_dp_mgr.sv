@@ -18,8 +18,12 @@ Authors:
 module cndm_micro_dp_mgr #
 (
     parameter PORTS = 2,
+
+    parameter CQN_W = 5,
+
     parameter logic PTP_EN = 1'b1,
     parameter PTP_BASE_ADDR_DP = 0,
+
     parameter PORT_BASE_ADDR_DP = 0,
     parameter PORT_BASE_ADDR_HOST = 0
 )
@@ -247,9 +251,9 @@ always_comb begin
 
             // determine block base address
             case (opcode_reg)
+                // // EQ
                 // CMD_OP_CREATE_EQ:
                 // begin
-                //     // EQ
                 //     qn_next = 0;
                 //     dp_ptr_next = DP_APB_ADDR_W'({port_reg, 16'd0} | 'h8000) + DP_APB_ADDR_W'(PORT_BASE_ADDR_DP);
                 //     host_ptr_next = 32'({port_reg, 16'd0} | 'h8000) + PORT_BASE_ADDR_HOST;
@@ -258,14 +262,13 @@ always_comb begin
                 // CMD_OP_QUERY_EQ,
                 // CMD_OP_DESTROY_EQ:
                 // begin
-                //     // EQ
                 //     dp_ptr_next = DP_APB_ADDR_W'({port_reg, 16'd0} | 'h8000) + DP_APB_ADDR_W'(PORT_BASE_ADDR_DP);
                 //     host_ptr_next = 32'({port_reg, 16'd0} | 'h8000) + PORT_BASE_ADDR_HOST;
                 // end
+                // CQ
                 CMD_OP_CREATE_CQ:
                 begin
-                    // CQ
-                    cnt_next = 1;
+                    cnt_next = 2**CQN_W-1;
                     dp_ptr_next = DP_APB_ADDR_W'({port_reg, 16'd0} | 'h8000) + DP_APB_ADDR_W'(PORT_BASE_ADDR_DP);
                     host_ptr_next = 32'({port_reg, 16'd0} | 'h8000) + PORT_BASE_ADDR_HOST;
                 end
@@ -273,13 +276,12 @@ always_comb begin
                 CMD_OP_QUERY_CQ,
                 CMD_OP_DESTROY_CQ:
                 begin
-                    // CQ
-                    dp_ptr_next = DP_APB_ADDR_W'({port_reg, 16'd0} | 'h8000 | {qn_reg, 8'd00}) + DP_APB_ADDR_W'(PORT_BASE_ADDR_DP);
-                    host_ptr_next = 32'({port_reg, 16'd0} | 'h8000 | {qn_reg, 8'd00}) + PORT_BASE_ADDR_HOST;
+                    dp_ptr_next = DP_APB_ADDR_W'({port_reg, 16'd0} | 'h8000 | {qn_reg, 5'd00}) + DP_APB_ADDR_W'(PORT_BASE_ADDR_DP);
+                    host_ptr_next = 32'({port_reg, 16'd0} | 'h8000 | {qn_reg, 5'd00}) + PORT_BASE_ADDR_HOST;
                 end
+                // SQ
                 CMD_OP_CREATE_SQ:
                 begin
-                    // SQ
                     cnt_next = 0;
                     dp_ptr_next = DP_APB_ADDR_W'({port_reg, 16'd0} | 'h0000) + DP_APB_ADDR_W'(PORT_BASE_ADDR_DP);
                     host_ptr_next = 32'({port_reg, 16'd0} | 'h0000) + PORT_BASE_ADDR_HOST;
@@ -288,13 +290,12 @@ always_comb begin
                 CMD_OP_QUERY_SQ,
                 CMD_OP_DESTROY_SQ:
                 begin
-                    // SQ
                     dp_ptr_next = DP_APB_ADDR_W'({port_reg, 16'd0} | 'h0000) + DP_APB_ADDR_W'(PORT_BASE_ADDR_DP);
                     host_ptr_next = 32'({port_reg, 16'd0} | 'h0000) + PORT_BASE_ADDR_HOST;
                 end
+                // RQ
                 CMD_OP_CREATE_RQ:
                 begin
-                    // RQ
                     cnt_next = 0;
                     dp_ptr_next = DP_APB_ADDR_W'({port_reg, 16'd0} | 'h0100) + DP_APB_ADDR_W'(PORT_BASE_ADDR_DP);
                     host_ptr_next = 32'({port_reg, 16'd0} | 'h0100) + PORT_BASE_ADDR_HOST;
@@ -303,7 +304,6 @@ always_comb begin
                 CMD_OP_QUERY_RQ,
                 CMD_OP_DESTROY_RQ:
                 begin
-                    // RQ
                     dp_ptr_next = DP_APB_ADDR_W'({port_reg, 16'd0} | 'h0100) + DP_APB_ADDR_W'(PORT_BASE_ADDR_DP);
                     host_ptr_next = 32'({port_reg, 16'd0} | 'h0100) + PORT_BASE_ADDR_HOST;
                 end
@@ -470,7 +470,8 @@ always_comb begin
                 end else begin
                     // queue is active
                     qn_next = qn_reg + 1;
-                    dp_ptr_next = dp_ptr_reg + 'h100;
+                    dp_ptr_next = dp_ptr_reg + 'h20;
+                    host_ptr_next = host_ptr_reg + 'h20;
                     if (cnt_reg == 0) begin
                         // no more queues
                         m_axis_rsp_tdata_next = '0; // TODO

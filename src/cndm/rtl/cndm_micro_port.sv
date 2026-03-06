@@ -16,6 +16,10 @@ Authors:
  * Corundum-micro port module
  */
 module cndm_micro_port #(
+    // Queue configuration
+    parameter CQN_W = 5,
+
+    // PTP configuration
     parameter logic PTP_TS_EN = 1'b1,
     parameter logic PTP_TS_FMT_TOD = 1'b0
 )
@@ -387,7 +391,9 @@ cpl_mux_inst (
     .m_axis(axis_cpl)
 );
 
-cndm_micro_cpl_wr
+cndm_micro_cpl_wr #(
+    .CQN_W(CQN_W)
+)
 cpl_wr_inst (
     .clk(clk),
     .rst(rst),

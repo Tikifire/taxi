@@ -36,6 +36,9 @@ module cndm_micro_pcie_us #(
     // Structural configuration
     parameter PORTS = 2,
 
+    // Queue configuration
+    parameter CQN_W = 5,
+
     // PTP configuration
     parameter logic PTP_TS_EN = 1'b1,
     parameter logic PTP_TS_FMT_TOD = 1'b0,
@@ -509,6 +512,9 @@ cndm_micro_core #(
 
     // Structural configuration
     .PORTS(PORTS),
+
+    // Queue configuration
+    .CQN_W(CQN_W),
 
     // PTP configuration
     .PTP_TS_EN(PTP_TS_EN),
