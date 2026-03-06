@@ -304,9 +304,11 @@ cmd_mbox_inst (
 
 // datapath manager
 
+localparam APB_DP_ADDR_W = 16+$clog2(PORTS+PORT_OFFSET_DP);
+
 taxi_apb_if #(
     .DATA_W(32),
-    .ADDR_W(16+$clog2(PORTS+PORT_OFFSET_DP))
+    .ADDR_W(APB_DP_ADDR_W)
 )
 apb_dp_ctrl();
 
@@ -346,7 +348,7 @@ apb_port_dp_ctrl[PORT_OFFSET_DP+PORTS]();
 
 taxi_apb_interconnect #(
     .M_CNT($size(apb_port_dp_ctrl)),
-    .ADDR_W(apb_dp_ctrl.ADDR_W),
+    .ADDR_W(APB_DP_ADDR_W),
     .M_REGIONS(1),
     .M_BASE_ADDR('0),
     .M_ADDR_W({$size(apb_port_dp_ctrl){{1{32'd16}}}}),

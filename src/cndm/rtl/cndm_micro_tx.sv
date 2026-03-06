@@ -16,35 +16,45 @@ Authors:
  * Corundum-micro transmit datapath
  */
 module cndm_micro_tx #(
+    parameter WQN_W = 5,
+
     parameter logic PTP_TS_EN = 1'b1,
     parameter logic PTP_TS_FMT_TOD = 1'b0
 )
 (
-    input  wire logic         clk,
-    input  wire logic         rst,
+    input  wire logic              clk,
+    input  wire logic              rst,
 
     /*
      * PTP
      */
-    input  wire logic         ptp_clk = 1'b0,
-    input  wire logic         ptp_rst = 1'b0,
-    input  wire logic         ptp_td_sdi = 1'b0,
+    input  wire logic              ptp_clk = 1'b0,
+    input  wire logic              ptp_rst = 1'b0,
+    input  wire logic              ptp_td_sdi = 1'b0,
 
     /*
      * DMA
      */
-    taxi_dma_desc_if.req_src  dma_rd_desc_req,
-    taxi_dma_desc_if.sts_snk  dma_rd_desc_sts,
-    taxi_dma_ram_if.wr_slv    dma_ram_wr,
+    taxi_dma_desc_if.req_src       dma_rd_desc_req,
+    taxi_dma_desc_if.sts_snk       dma_rd_desc_sts,
+    taxi_dma_ram_if.wr_slv         dma_ram_wr,
 
-    output wire logic         desc_req,
-    taxi_axis_if.snk          s_axis_desc,
-    taxi_axis_if.src          tx_data,
-    taxi_axis_if.snk          tx_cpl,
-    taxi_axis_if.src          m_axis_cpl
+    input  wire logic [WQN_W-1:0]  tx_queue,
+    taxi_axis_if.src               m_axis_desc_req,
+    taxi_axis_if.snk               s_axis_desc,
+    taxi_axis_if.src               tx_data,
+    taxi_axis_if.snk               tx_cpl,
+    taxi_axis_if.src               m_axis_cpl
 );
 
 localparam RAM_ADDR_W = 16;
+
+typedef enum logic [2:0] {
+    QTYPE_EQ,
+    QTYPE_CQ,
+    QTYPE_SQ,
+    QTYPE_RQ
+} qtype_t;
 
 taxi_dma_desc_if #(
     .SRC_ADDR_W(RAM_ADDR_W),
@@ -71,9 +81,18 @@ typedef enum logic [1:0] {
 
 state_t state_reg = STATE_IDLE;
 
-logic desc_req_reg = 1'b0;
+logic m_axis_desc_req_tvalid_reg = 1'b0;
+logic [WQN_W-1:0] m_axis_desc_req_tdest_reg = '0;
+logic [2:0] m_axis_desc_req_tuser_reg = '0;
 
-assign desc_req = desc_req_reg;
+assign m_axis_desc_req.tdata = '0;
+assign m_axis_desc_req.tkeep = '0;
+assign m_axis_desc_req.tstrb = '0;
+assign m_axis_desc_req.tlast = 1'b1;
+assign m_axis_desc_req.tvalid = m_axis_desc_req_tvalid_reg;
+assign m_axis_desc_req.tid = '0;
+assign m_axis_desc_req.tdest = m_axis_desc_req_tdest_reg;
+assign m_axis_desc_req.tuser = m_axis_desc_req_tuser_reg;
 
 wire [95:0] tx_cpl_ptp_ts;
 wire tx_cpl_valid;
@@ -138,7 +157,7 @@ end else begin
 end
 
 always_ff @(posedge clk) begin
-    desc_req_reg <= 1'b0;
+    m_axis_desc_req_tvalid_reg <= m_axis_desc_req_tvalid_reg && !m_axis_desc_req.tready;
 
     s_axis_desc.tready <= 1'b0;
 
@@ -175,7 +194,10 @@ always_ff @(posedge clk) begin
 
     case (state_reg)
         STATE_IDLE: begin
-            desc_req_reg <= 1'b1;
+            m_axis_desc_req_tvalid_reg <= 1'b1;
+            m_axis_desc_req_tdest_reg <= tx_queue;
+            m_axis_desc_req_tuser_reg <= QTYPE_SQ;
+
             state_reg <= STATE_READ_DESC;
         end
         STATE_READ_DESC: begin

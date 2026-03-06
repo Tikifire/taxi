@@ -74,15 +74,20 @@ module cndm_micro_port #(
 localparam AXIL_ADDR_W = s_axil_ctrl_wr.ADDR_W;
 localparam AXIL_DATA_W = s_axil_ctrl_wr.DATA_W;
 
+localparam APB_ADDR_W = s_apb_dp_ctrl.ADDR_W;
+localparam APB_DATA_W = s_apb_dp_ctrl.DATA_W;
+
 localparam RAM_SEGS = dma_ram_wr.SEGS;
 localparam RAM_SEG_ADDR_W = dma_ram_wr.SEG_ADDR_W;
 localparam RAM_SEG_DATA_W = dma_ram_wr.SEG_DATA_W;
 localparam RAM_SEG_BE_W = dma_ram_wr.SEG_BE_W;
 localparam RAM_SEL_W = dma_ram_wr.SEL_W;
 
+localparam PORT_ADDR_W = 14;
+
 taxi_axil_if #(
     .DATA_W(s_axil_ctrl_wr.DATA_W),
-    .ADDR_W(15),
+    .ADDR_W(PORT_ADDR_W),
     .STRB_W(s_axil_ctrl_wr.STRB_W),
     .AWUSER_EN(s_axil_ctrl_wr.AWUSER_EN),
     .AWUSER_W(s_axil_ctrl_wr.AWUSER_W),
@@ -102,7 +107,7 @@ taxi_axil_interconnect_1s #(
     .ADDR_W(s_axil_ctrl_wr.ADDR_W),
     .M_REGIONS(1),
     .M_BASE_ADDR('0),
-    .M_ADDR_W({$size(axil_ctrl){{1{32'd15}}}}),
+    .M_ADDR_W({$size(axil_ctrl){{1{32'd14}}}}),
     .M_SECURE({$size(axil_ctrl){1'b0}})
 )
 port_intercon_inst (
@@ -124,16 +129,16 @@ port_intercon_inst (
 
 taxi_apb_if #(
     .DATA_W(32),
-    .ADDR_W(15)
+    .ADDR_W(PORT_ADDR_W)
 )
-apb_dp_ctrl[2]();
+apb_dp_ctrl[3]();
 
 taxi_apb_interconnect #(
     .M_CNT($size(apb_dp_ctrl)),
     .ADDR_W(s_apb_dp_ctrl.ADDR_W),
     .M_REGIONS(1),
     .M_BASE_ADDR('0),
-    .M_ADDR_W({$size(apb_dp_ctrl){{1{32'd15}}}}),
+    .M_ADDR_W({$size(apb_dp_ctrl){{1{32'd14}}}}),
     .M_SECURE({$size(apb_dp_ctrl){1'b0}})
 )
 port_dp_intercon_inst (
@@ -150,6 +155,47 @@ port_dp_intercon_inst (
      */
     .m_apb(apb_dp_ctrl)
 );
+
+// Port control registers
+
+logic apb_dp_ctrl_pready_reg = 1'b0;
+logic [APB_DATA_W-1:0] apb_dp_ctrl_prdata_reg = '0;
+
+assign apb_dp_ctrl[2].pready = apb_dp_ctrl_pready_reg;
+assign apb_dp_ctrl[2].prdata = apb_dp_ctrl_prdata_reg;
+assign apb_dp_ctrl[2].pslverr = 1'b0;
+assign apb_dp_ctrl[2].pruser = '0;
+assign apb_dp_ctrl[2].pbuser = '0;
+
+logic [WQN_W-1:0] tx_queue_reg = '0;
+logic [WQN_W-1:0] rx_queue_reg = '0;
+
+always_ff @(posedge clk) begin
+    apb_dp_ctrl_pready_reg <= 1'b0;
+
+    if (apb_dp_ctrl[2].penable && apb_dp_ctrl[2].psel && !apb_dp_ctrl_pready_reg) begin
+        apb_dp_ctrl_pready_reg <= 1'b1;
+        apb_dp_ctrl_prdata_reg <= '0;
+
+        if (apb_dp_ctrl[2].pwrite) begin
+            case (8'({apb_dp_ctrl[2].paddr >> 2, 2'b00}))
+                8'h10: tx_queue_reg <= WQN_W'(apb_dp_ctrl[2].pwdata);
+                8'h20: rx_queue_reg <= WQN_W'(apb_dp_ctrl[2].pwdata);
+                default: begin end
+            endcase
+        end
+
+        case (8'({apb_dp_ctrl[2].paddr >> 2, 2'b00}))
+            8'h10: apb_dp_ctrl_prdata_reg <= 32'(tx_queue_reg);
+            8'h20: apb_dp_ctrl_prdata_reg <= 32'(rx_queue_reg);
+            default: begin end
+        endcase
+    end
+
+    if (rst) begin
+        apb_dp_ctrl_pready_reg <= 1'b0;
+    end
+end
 
 taxi_dma_desc_if #(
     .SRC_ADDR_W(dma_rd_desc_req.SRC_ADDR_W),
@@ -267,7 +313,50 @@ wr_dma_mux_inst (
 );
 
 // descriptor fetch
-wire [1:0] desc_req;
+taxi_axis_if #(
+    .DATA_W(8),
+    .KEEP_EN(0),
+    .LAST_EN(1),
+    .ID_EN(1),
+    .ID_W(1),
+    .DEST_EN(1),
+    .DEST_W(WQN_W),
+    .USER_EN(1),
+    .USER_W(3)
+) axis_desc_req();
+
+taxi_axis_if #(
+    .DATA_W(8),
+    .KEEP_EN(0),
+    .LAST_EN(1),
+    .ID_EN(1),
+    .ID_W(1),
+    .DEST_EN(1),
+    .DEST_W(WQN_W),
+    .USER_EN(1),
+    .USER_W(3)
+) axis_desc_req_txrx[2]();
+
+taxi_axis_arb_mux #(
+    .S_COUNT(2),
+    .UPDATE_TID(1),
+    .ARB_ROUND_ROBIN(0),
+    .ARB_LSB_HIGH_PRIO(0) // prefer RX requests
+)
+desc_req_mux_inst (
+    .clk(clk),
+    .rst(rst),
+
+    /*
+     * AXI4-Stream input (sink)
+     */
+    .s_axis(axis_desc_req_txrx),
+
+    /*
+     * AXI4-Stream output (source)
+     */
+    .m_axis(axis_desc_req)
+);
 
 taxi_axis_if #(
     .DATA_W(16*8),
@@ -307,7 +396,7 @@ desc_rd_inst (
     .dma_rd_desc_sts(dma_rd_desc_int[0]),
     .dma_ram_wr(dma_ram_wr_int[0]),
 
-    .desc_req(desc_req),
+    .s_axis_desc_req(axis_desc_req),
     .m_axis_desc(axis_desc)
 );
 
@@ -533,6 +622,8 @@ tx_cpl_fifo (
 );
 
 cndm_micro_tx #(
+    .WQN_W(WQN_W),
+
     .PTP_TS_EN(PTP_TS_EN),
     .PTP_TS_FMT_TOD(PTP_TS_FMT_TOD)
 )
@@ -554,7 +645,8 @@ tx_inst (
     .dma_rd_desc_sts(dma_rd_desc_int[1]),
     .dma_ram_wr(dma_ram_wr_int[1]),
 
-    .desc_req(desc_req[0]),
+    .tx_queue(tx_queue_reg),
+    .m_axis_desc_req(axis_desc_req_txrx[0]),
     .s_axis_desc(axis_desc_txrx[0]),
     .tx_data(mac_tx_int),
     .tx_cpl(mac_tx_cpl_int),
@@ -617,6 +709,8 @@ rx_fifo (
 );
 
 cndm_micro_rx #(
+    .WQN_W(WQN_W),
+
     .PTP_TS_EN(PTP_TS_EN),
     .PTP_TS_FMT_TOD(PTP_TS_FMT_TOD)
 )
@@ -639,7 +733,8 @@ rx_inst (
     .dma_ram_rd(dma_ram_rd_int[1]),
 
     .rx_data(mac_rx_int),
-    .desc_req(desc_req[1]),
+    .rx_queue(rx_queue_reg),
+    .m_axis_desc_req(axis_desc_req_txrx[1]),
     .s_axis_desc(axis_desc_txrx[1]),
     .m_axis_cpl(axis_cpl_txrx[1])
 );

@@ -41,7 +41,7 @@ module cndm_micro_desc_rd #(
     taxi_dma_desc_if.sts_snk  dma_rd_desc_sts,
     taxi_dma_ram_if.wr_slv    dma_ram_wr,
 
-    input  wire logic [1:0]   desc_req,
+    taxi_axis_if.snk          s_axis_desc_req,
     taxi_axis_if.src          m_axis_desc
 );
 
@@ -132,7 +132,9 @@ typedef enum logic [1:0] {
 
 state_t state_reg = STATE_IDLE;
 
-logic [1:0] desc_req_reg = '0;
+logic s_axis_desc_req_tready_reg = 1'b0;
+
+assign s_axis_desc_req.tready = s_axis_desc_req_tready_reg;
 
 always_ff @(posedge clk) begin
     dma_rd_desc_req.req_src_sel <= '0;
@@ -163,25 +165,18 @@ always_ff @(posedge clk) begin
     wq_req_valid_reg <= wq_req_valid_reg && !wq_req_ready;
     wq_rsp_ready_reg <= 1'b0;
 
-    desc_req_reg <= desc_req_reg | desc_req;
+    s_axis_desc_req_tready_reg <= 1'b0;
 
     case (state_reg)
         STATE_IDLE: begin
-            wq_req_wqn_reg <= 0;
+            s_axis_desc_req_tready_reg <= 1'b1;
 
-            if (desc_req_reg[1]) begin
-                desc_req_reg[1] <= 1'b0;
-                wq_req_wqn_reg <= 1;
-                wq_req_qtype_reg <= QTYPE_RQ;
+            if (s_axis_desc_req.tvalid && s_axis_desc_req.tready) begin
+                s_axis_desc_req_tready_reg <= 1'b0;
+                wq_req_wqn_reg <= s_axis_desc_req.tdest;
+                wq_req_qtype_reg <= s_axis_desc_req.tuser;
                 wq_req_valid_reg <= 1'b1;
-                dma_desc.req_id <= 1'b1;
-                state_reg <= STATE_QUERY_WQ;
-            end else if (desc_req_reg[0]) begin
-                desc_req_reg[0] <= 1'b0;
-                wq_req_wqn_reg <= 0;
-                wq_req_qtype_reg <= QTYPE_SQ;
-                wq_req_valid_reg <= 1'b1;
-                dma_desc.req_id <= 1'b0;
+                dma_desc.req_id <= s_axis_desc_req.tid;
                 state_reg <= STATE_QUERY_WQ;
             end else begin
                 state_reg <= STATE_IDLE;

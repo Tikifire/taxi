@@ -26,7 +26,12 @@ module cndm_micro_dp_mgr #
     parameter PTP_BASE_ADDR_DP = 0,
 
     parameter PORT_BASE_ADDR_DP = 0,
-    parameter PORT_BASE_ADDR_HOST = 0
+    parameter PORT_BASE_ADDR_HOST = 0,
+    parameter PORT_STRIDE = 'h10000,
+    parameter WQ_REG_STRIDE = 32,
+    parameter QM_OFFSET = 'h0000,
+    parameter CQM_OFFSET = 'h4000,
+    parameter PORT_CTRL_OFFSET = 'h8000
 )
 (
     input  wire logic    clk,
@@ -103,6 +108,7 @@ typedef enum logic [4:0] {
     STATE_CREATE_Q_SET_BASE_H,
     STATE_CREATE_Q_SET_DQN,
     STATE_CREATE_Q_ENABLE,
+    STATE_CREATE_Q_PORT_CONFIG,
     STATE_DESTROY_Q_DISABLE,
     STATE_PTP_READ_1,
     STATE_PTP_READ_2,
@@ -282,48 +288,48 @@ always_comb begin
                 begin
                     cnt_next = 2**CQN_W-1;
                     qtype_next = QTYPE_CQ;
-                    dp_ptr_next = DP_APB_ADDR_W'({port_reg, 16'd0} | 'h8000) + DP_APB_ADDR_W'(PORT_BASE_ADDR_DP);
-                    host_ptr_next = 32'({port_reg, 16'd0} | 'h8000) + PORT_BASE_ADDR_HOST;
+                    dp_ptr_next = DP_APB_ADDR_W'((port_reg * PORT_STRIDE) + CQM_OFFSET + PORT_BASE_ADDR_DP);
+                    host_ptr_next = (port_reg * PORT_STRIDE) + CQM_OFFSET + PORT_BASE_ADDR_HOST;
                 end
                 CMD_OP_MODIFY_CQ,
                 CMD_OP_QUERY_CQ,
                 CMD_OP_DESTROY_CQ:
                 begin
                     qtype_next = QTYPE_CQ;
-                    dp_ptr_next = DP_APB_ADDR_W'({port_reg, 16'd0} | 'h8000 | {qn_reg, 5'd00}) + DP_APB_ADDR_W'(PORT_BASE_ADDR_DP);
-                    host_ptr_next = 32'({port_reg, 16'd0} | 'h8000 | {qn_reg, 5'd00}) + PORT_BASE_ADDR_HOST;
+                    dp_ptr_next = DP_APB_ADDR_W'((port_reg * PORT_STRIDE) + CQM_OFFSET + (qn_reg * WQ_REG_STRIDE) + PORT_BASE_ADDR_DP);
+                    host_ptr_next = (port_reg * PORT_STRIDE) + CQM_OFFSET + (qn_reg * WQ_REG_STRIDE) + PORT_BASE_ADDR_HOST;
                 end
                 // SQ
                 CMD_OP_CREATE_SQ:
                 begin
-                    cnt_next = 0;
+                    cnt_next = 2**WQN_W-1;
                     qtype_next = QTYPE_SQ;
-                    dp_ptr_next = DP_APB_ADDR_W'({port_reg, 16'd0} | 'h0000) + DP_APB_ADDR_W'(PORT_BASE_ADDR_DP);
-                    host_ptr_next = 32'({port_reg, 16'd0} | 'h0000) + PORT_BASE_ADDR_HOST;
+                    dp_ptr_next = DP_APB_ADDR_W'((port_reg * PORT_STRIDE) + QM_OFFSET + PORT_BASE_ADDR_DP);
+                    host_ptr_next = (port_reg * PORT_STRIDE) + QM_OFFSET + PORT_BASE_ADDR_HOST;
                 end
                 CMD_OP_MODIFY_SQ,
                 CMD_OP_QUERY_SQ,
                 CMD_OP_DESTROY_SQ:
                 begin
                     qtype_next = QTYPE_SQ;
-                    dp_ptr_next = DP_APB_ADDR_W'({port_reg, 16'd0} | 'h0000) + DP_APB_ADDR_W'(PORT_BASE_ADDR_DP);
-                    host_ptr_next = 32'({port_reg, 16'd0} | 'h0000) + PORT_BASE_ADDR_HOST;
+                    dp_ptr_next = DP_APB_ADDR_W'((port_reg * PORT_STRIDE) + QM_OFFSET + (qn_reg * WQ_REG_STRIDE) + PORT_BASE_ADDR_DP);
+                    host_ptr_next = (port_reg * PORT_STRIDE) + QM_OFFSET + (qn_reg * WQ_REG_STRIDE) + PORT_BASE_ADDR_HOST;
                 end
                 // RQ
                 CMD_OP_CREATE_RQ:
                 begin
-                    cnt_next = 0;
+                    cnt_next = 2**WQN_W-1;
                     qtype_next = QTYPE_RQ;
-                    dp_ptr_next = DP_APB_ADDR_W'({port_reg, 16'd0} | 'h0020) + DP_APB_ADDR_W'(PORT_BASE_ADDR_DP);
-                    host_ptr_next = 32'({port_reg, 16'd0} | 'h0020) + PORT_BASE_ADDR_HOST;
+                    dp_ptr_next = DP_APB_ADDR_W'((port_reg * PORT_STRIDE) + QM_OFFSET + (qn_reg * WQ_REG_STRIDE) + PORT_BASE_ADDR_DP);
+                    host_ptr_next = (port_reg * PORT_STRIDE) + QM_OFFSET + (qn_reg * WQ_REG_STRIDE) + PORT_BASE_ADDR_HOST;
                 end
                 CMD_OP_MODIFY_RQ,
                 CMD_OP_QUERY_RQ,
                 CMD_OP_DESTROY_RQ:
                 begin
                     qtype_next = QTYPE_RQ;
-                    dp_ptr_next = DP_APB_ADDR_W'({port_reg, 16'd0} | 'h0020) + DP_APB_ADDR_W'(PORT_BASE_ADDR_DP);
-                    host_ptr_next = 32'({port_reg, 16'd0} | 'h0020) + PORT_BASE_ADDR_HOST;
+                    dp_ptr_next = DP_APB_ADDR_W'((port_reg * PORT_STRIDE) + QM_OFFSET + PORT_BASE_ADDR_DP);
+                    host_ptr_next = (port_reg * PORT_STRIDE) + QM_OFFSET + PORT_BASE_ADDR_HOST;
                 end
                 default: begin end
             endcase
@@ -488,8 +494,8 @@ always_comb begin
                 end else begin
                     // queue is active
                     qn_next = qn_reg + 1;
-                    dp_ptr_next = dp_ptr_reg + 'h20;
-                    host_ptr_next = host_ptr_reg + 'h20;
+                    dp_ptr_next = dp_ptr_reg + WQ_REG_STRIDE;
+                    host_ptr_next = host_ptr_reg + WQ_REG_STRIDE;
                     if (cnt_reg == 0) begin
                         // no more queues
                         m_axis_rsp_tdata_next = '0; // TODO
@@ -614,9 +620,27 @@ always_comb begin
                 m_apb_dp_ctrl_psel_next = 1'b1;
                 m_apb_dp_ctrl_pwrite_next = 1'b1;
                 m_apb_dp_ctrl_pwdata_next = '0;
-                m_apb_dp_ctrl_pwdata_next[19:16] = cmd_ram_rd_data[3:0];
-                m_apb_dp_ctrl_pwdata_next[23:20] = 4'(qtype_reg);
-                m_apb_dp_ctrl_pwdata_next[0] = 1'b1;
+                m_apb_dp_ctrl_pwdata_next[23:20] = 4'(qtype_reg); // type
+                m_apb_dp_ctrl_pwdata_next[19:16] = cmd_ram_rd_data[3:0]; // size
+                m_apb_dp_ctrl_pwdata_next[0] = 1'b1; // enable
+                m_apb_dp_ctrl_pstrb_next = '1;
+
+                state_next = STATE_CREATE_Q_PORT_CONFIG;
+            end else begin
+                state_next = STATE_CREATE_Q_ENABLE;
+            end
+        end
+        STATE_CREATE_Q_PORT_CONFIG: begin
+            // set up port
+            if (!m_apb_dp_ctrl_psel_reg) begin
+                if (qtype_reg == QTYPE_SQ) begin
+                    m_apb_dp_ctrl_paddr_next = DP_APB_ADDR_W'(PORT_BASE_ADDR_DP + (port_reg * PORT_STRIDE) + PORT_CTRL_OFFSET + 'h0010);
+                end else begin
+                    m_apb_dp_ctrl_paddr_next = DP_APB_ADDR_W'(PORT_BASE_ADDR_DP + (port_reg * PORT_STRIDE) + PORT_CTRL_OFFSET + 'h0020);
+                end
+                m_apb_dp_ctrl_psel_next = 1'b1;
+                m_apb_dp_ctrl_pwrite_next = qtype_reg == QTYPE_SQ || qtype_reg == QTYPE_RQ;
+                m_apb_dp_ctrl_pwdata_next = 32'(qn_reg);
                 m_apb_dp_ctrl_pstrb_next = '1;
 
                 m_axis_rsp_tdata_next = '0; // TODO
@@ -625,7 +649,7 @@ always_comb begin
 
                 state_next = STATE_SEND_RSP;
             end else begin
-                state_next = STATE_CREATE_Q_ENABLE;
+                state_next = STATE_CREATE_Q_PORT_CONFIG;
             end
         end
         STATE_DESTROY_Q_DISABLE: begin
