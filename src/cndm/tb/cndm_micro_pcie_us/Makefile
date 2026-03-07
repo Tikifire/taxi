@@ -24,9 +24,6 @@ MODULE   = $(COCOTB_TEST_MODULES)
 TOPLEVEL = $(COCOTB_TOPLEVEL)
 VERILOG_SOURCES += $(COCOTB_TOPLEVEL).sv
 VERILOG_SOURCES += $(RTL_DIR)/$(DUT).f
-VERILOG_SOURCES += $(TAXI_SRC_DIR)/axis/rtl/taxi_axis_async_fifo.f
-VERILOG_SOURCES += $(TAXI_SRC_DIR)/sync/rtl/taxi_sync_reset.sv
-VERILOG_SOURCES += $(TAXI_SRC_DIR)/sync/rtl/taxi_sync_signal.sv
 
 # handle file list files
 process_f_file = $(call process_f_files,$(addprefix $(dir $1),$(shell cat $1)))
