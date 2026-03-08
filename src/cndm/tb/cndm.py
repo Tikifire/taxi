@@ -9,6 +9,7 @@ Authors:
 """
 
 import array
+import datetime
 import logging
 import struct
 from collections import deque
@@ -18,6 +19,8 @@ from cocotb.queue import Queue
 
 # Command opcodes
 CNDM_CMD_OP_NOP = 0x0000
+
+CNDM_CMD_OP_CFG        = 0x0100
 
 CNDM_CMD_OP_ACCESS_REG = 0x0180
 CNDM_CMD_OP_PTP        = 0x0190
@@ -605,6 +608,44 @@ class Driver:
         self.free_packets = deque()
         self.allocated_packets = []
 
+        # config
+        self.cfg_page_max = None
+        self.cmd_ver = None
+
+        # FW ID
+        self.fpga_id = None
+        self.fw_id = None
+        self.fw_ver = None
+        self.board_id = None
+        self.board_ver = None
+        self.build_date = None
+        self.git_hash = None
+        self.release_info = None
+
+        # HW config
+        self.sys_clk_per_ns_num = None
+        self.sys_clk_per_ns_den = None
+        self.ptp_clk_per_ns_num = None
+        self.ptp_clk_per_ns_den = None
+
+        # Resources
+        self.log_max_eq = None
+        self.log_max_eq_sz = None
+        self.eq_pool = None
+        self.eqe_ver = None
+        self.log_max_cq = None
+        self.log_max_cq_sz = None
+        self.cq_pool = None
+        self.cqe_ver = None
+        self.log_max_sq = None
+        self.log_max_sq_sz = None
+        self.sq_pool = None
+        self.sqe_ver = None
+        self.log_max_rq = None
+        self.log_max_rq_sz = None
+        self.rq_pool = None
+        self.rqe_ver = None
+
     async def init_pcie_dev(self, dev):
         self.dev = dev
         self.pool = dev.rc.mem_pool
@@ -618,9 +659,155 @@ class Driver:
         await self.init_common()
 
     async def init_common(self):
-        self.port_count = await self.hw_regs.read_dword(0x0100)
+
+        # Get config information
+        rsp = await self.exec_cmd(struct.pack("<HHLHHLLLLLLLLLLLLL",
+            0, # rsvd
+            CNDM_CMD_OP_CFG, # opcode
+            0x00000000, # flags
+            0, # cfg_page
+            0, # num_cfg_pages
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+        ))
+
+        rsp_unpacked = struct.unpack("<HHLHHLLLLLLLLLLLLL", rsp)
+        print(rsp_unpacked)
+
+        self.cfg_page_max = rsp_unpacked[4]
+        self.cmd_ver = rsp_unpacked[5]
+
+        self.log.info("Config pages: %d", self.cfg_page_max+1)
+        self.log.info("Command version: %d.%d.%d", self.cmd_ver >> 20, (self.cmd_ver >> 12) & 0xff, self.cmd_ver & 0xfff)
+
+        self.fpga_id = rsp_unpacked[10]
+        self.fw_id = rsp_unpacked[11]
+        self.fw_ver = rsp_unpacked[12]
+        self.board_id = rsp_unpacked[13]
+        self.board_ver = rsp_unpacked[14]
+        self.build_date = rsp_unpacked[15]
+        self.git_hash = rsp_unpacked[16]
+        self.release_info = rsp_unpacked[17]
+
+        self.log.info("FPGA JTAG ID: 0x%08x", self.fpga_id)
+        self.log.info("FW ID: 0x%08x", self.fw_id)
+        self.log.info("FW version: %d.%d.%d", self.fw_ver >> 20, (self.fw_ver >> 12) & 0xff, self.fw_ver & 0xfff)
+        self.log.info("Board ID: 0x%08x", self.board_id)
+        self.log.info("Board version: %d.%d.%d", self.board_ver >> 20, (self.board_ver >> 12) & 0xff, self.board_ver & 0xfff)
+        self.log.info("Build date: %s UTC (raw: 0x%08x)", datetime.datetime.fromtimestamp(self.build_date, datetime.timezone.utc).isoformat(' '), self.build_date)
+        self.log.info("Git hash: %08x", self.git_hash)
+        self.log.info("Release info: %08x", self.release_info)
+
+        # Get config information
+        rsp = await self.exec_cmd(struct.pack("<HHLHHLLLLLLLLLLLLL",
+            0, # rsvd
+            CNDM_CMD_OP_CFG, # opcode
+            0x00000000, # flags
+            1, # cfg_page
+            0, # num_cfg_pages
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+        ))
+
+        rsp_unpacked = struct.unpack("<HHLHHLLLLLLLLLLLLL", rsp)
+        print(rsp_unpacked)
+
+        self.port_count = rsp_unpacked[10] & 0xff
+        self.sys_clk_per_ns_den = rsp_unpacked[14] & 0xffff
+        self.sys_clk_per_ns_num = rsp_unpacked[14] >> 16
+        self.ptp_clk_per_ns_den = rsp_unpacked[15] & 0xffff
+        self.ptp_clk_per_ns_num = rsp_unpacked[15] >> 16
 
         self.log.info("Port count: %d", self.port_count)
+
+        self.log.info("Sys clock period: %f MHz (raw %d/%d ns)",
+            1000/(self.sys_clk_per_ns_num/self.sys_clk_per_ns_den),
+            self.sys_clk_per_ns_num, self.sys_clk_per_ns_den)
+        self.log.info("PTP clock period: %f MHz (raw %d/%d ns)",
+            1000/(self.ptp_clk_per_ns_num/self.ptp_clk_per_ns_den),
+            self.ptp_clk_per_ns_num, self.ptp_clk_per_ns_den)
+
+        # Get config information
+        rsp = await self.exec_cmd(struct.pack("<HHLHHLLLLLLLLLLLLL",
+            0, # rsvd
+            CNDM_CMD_OP_CFG, # opcode
+            0x00000000, # flags
+            2, # cfg_page
+            0, # num_cfg_pages
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+        ))
+
+        rsp_unpacked = struct.unpack("<HHLHHLLLLLLLLLLLLL", rsp)
+        print(rsp_unpacked)
+
+        # Resources
+        self.log_max_eq = rsp_unpacked[10] & 0xff
+        self.log_max_eq_sz = (rsp_unpacked[10] >> 8) & 0xff
+        self.eq_pool = (rsp_unpacked[10] >> 16) & 0xff
+        self.eqe_ver = (rsp_unpacked[10] >> 24) & 0xff
+        self.log_max_cq = rsp_unpacked[11] & 0xff
+        self.log_max_cq_sz = (rsp_unpacked[11] >> 8) & 0xff
+        self.cq_pool = (rsp_unpacked[11] >> 16) & 0xff
+        self.cqe_ver = (rsp_unpacked[11] >> 24) & 0xff
+        self.log_max_sq = rsp_unpacked[12] & 0xff
+        self.log_max_sq_sz = (rsp_unpacked[12] >> 8) & 0xff
+        self.sq_pool = (rsp_unpacked[12] >> 16) & 0xff
+        self.sqe_ver = (rsp_unpacked[12] >> 24) & 0xff
+        self.log_max_rq = rsp_unpacked[13] & 0xff
+        self.log_max_rq_sz = (rsp_unpacked[13] >> 8) & 0xff
+        self.rq_pool = (rsp_unpacked[13] >> 16) & 0xff
+        self.rqe_ver = (rsp_unpacked[13] >> 24) & 0xff
+
+        self.log.info("Max EQ count: %d (log %d)", 2**self.log_max_eq, self.log_max_eq)
+        self.log.info("Max EQ size: %d (log %d)", 2**self.log_max_eq_sz, self.log_max_eq_sz)
+        self.log.info("EQ pool: %d", self.eq_pool)
+        self.log.info("EQE version: %d", self.eqe_ver)
+        self.log.info("Max CQ count: %d (log %d)", 2**self.log_max_cq, self.log_max_cq)
+        self.log.info("Max CQ size: %d (log %d)", 2**self.log_max_cq_sz, self.log_max_cq_sz)
+        self.log.info("CQ pool: %d", self.cq_pool)
+        self.log.info("CQE version: %d", self.cqe_ver)
+        self.log.info("Max SQ count: %d (log %d)", 2**self.log_max_sq, self.log_max_sq)
+        self.log.info("Max SQ size: %d (log %d)", 2**self.log_max_sq_sz, self.log_max_sq_sz)
+        self.log.info("SQ pool: %d", self.sq_pool)
+        self.log.info("SQE version: %d", self.sqe_ver)
+        self.log.info("Max RQ count: %d (log %d)", 2**self.log_max_rq, self.log_max_rq)
+        self.log.info("Max RQ size: %d (log %d)", 2**self.log_max_rq_sz, self.log_max_rq_sz)
+        self.log.info("RQ pool: %d", self.rq_pool)
+        self.log.info("RQE version: %d", self.rqe_ver)
 
         # Get PTP information
         rsp = await self.exec_cmd(struct.pack("<HHLLLQQQQQLL",
@@ -644,6 +831,7 @@ class Driver:
         nom_period = rsp_unpacked[8]
         self.log.info("PHC nominal period: %.09f ns (raw 0x%x)", nom_period / 2**32, nom_period)
 
+        # Test setting PTP time
         rsp = await self.exec_cmd(struct.pack("<HHLLLQQQQQLL",
             0, # rsvd
             CNDM_CMD_OP_PTP, # opcode
@@ -651,7 +839,7 @@ class Driver:
             0, # fns
             0x12345678, # tod_ns
             0x123456654321, # tod_sec
-            0x11223344, # rel_ns
+            0x112233445566, # rel_ns
             0, # ptm
             0, # nom_period
             nom_period, # period
