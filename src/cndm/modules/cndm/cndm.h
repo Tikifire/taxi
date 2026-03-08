@@ -58,6 +58,45 @@ struct cndm_dev {
 	struct ptp_clock *ptp_clock;
 	struct ptp_clock_info ptp_clock_info;
 	u64 ptp_nom_period;
+
+	// config
+	u16 cfg_page_max;
+	u32 cmd_ver;
+
+	// FW ID
+	u32 fpga_id;
+	u32 fw_id;
+	u32 fw_ver;
+	u32 board_id;
+	u32 board_ver;
+	u32 build_date;
+	u32 git_hash;
+	u32 release_info;
+	char build_date_str[32];
+
+	// HW config
+	u16 sys_clk_per_ns_num;
+	u16 sys_clk_per_ns_den;
+	u16 ptp_clk_per_ns_num;
+	u16 ptp_clk_per_ns_den;
+
+	// Resources
+	u8 log_max_eq;
+	u8 log_max_eq_sz;
+	u8 eq_pool;
+	u8 eqe_ver;
+	u8 log_max_cq;
+	u8 log_max_cq_sz;
+	u8 cq_pool;
+	u8 cqe_ver;
+	u8 log_max_sq;
+	u8 log_max_sq_sz;
+	u8 sq_pool;
+	u8 sqe_ver;
+	u8 log_max_rq;
+	u8 log_max_rq_sz;
+	u8 rq_pool;
+	u8 rqe_ver;
 };
 
 struct cndm_tx_info {

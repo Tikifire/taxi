@@ -15,6 +15,8 @@ Authors:
 
 #define CNDM_CMD_OP_NOP 0x0000
 
+#define CNDM_CMD_OP_CFG        0x0100
+
 #define CNDM_CMD_OP_ACCESS_REG 0x0180
 #define CNDM_CMD_OP_PTP        0x0190
 
@@ -43,28 +45,68 @@ Authors:
 #define CNDM_CMD_OP_QUERY_QP   0x0242
 #define CNDM_CMD_OP_DESTROY_QP 0x0243
 
-struct cndm_cmd_queue {
+struct cndm_cmd_cfg {
 	__le16 rsvd;
 	union {
 		__le16 opcode;
 		__le16 status;
 	};
 	__le32 flags;
-	__le32 port;
-	__le32 qn;
+	struct {
+		__le16 cfg_page;
+		__le16 cfg_page_max;
+	};
+	__le32 cmd_ver;
 
-	__le32 qn2;
-	__le32 pd;
-	__le32 size;
-	__le32 dboffs;
+	__le32 fw_ver;
+	__u8 port_count;
+	__u8 rsvd2[3];
+	__le32 rsvd3[2];
 
-	__le64 ptr1;
-	__le64 ptr2;
-
-	__le32 dw12;
-	__le32 dw13;
-	__le32 dw14;
-	__le32 dw15;
+	union {
+		struct {
+			// Page 0: FW ID
+			__le32 fpga_id;
+			__le32 fw_id;
+			__le32 fw_ver;
+			__le32 board_id;
+			__le32 board_ver;
+			__le32 build_date;
+			__le32 git_hash;
+			__le32 release_info;
+		} p0;
+		struct {
+			// Page 1: HW config
+			__le16 port_count;
+			__le16 rsvd1;
+			__le32 rsvd2[3];
+			__le16 sys_clk_per_ns_den;
+			__le16 sys_clk_per_ns_num;
+			__le16 ptp_clk_per_ns_den;
+			__le16 ptp_clk_per_ns_num;
+			__le32 rsvd3[2];
+		} p1;
+		struct {
+			// Page 2: Resources
+			__u8 log_max_eq;
+			__u8 log_max_eq_sz;
+			__u8 eq_pool;
+			__u8 eqe_ver;
+			__u8 log_max_cq;
+			__u8 log_max_cq_sz;
+			__u8 cq_pool;
+			__u8 cqe_ver;
+			__u8 log_max_sq;
+			__u8 log_max_sq_sz;
+			__u8 sq_pool;
+			__u8 sqe_ver;
+			__u8 log_max_rq;
+			__u8 log_max_rq_sz;
+			__u8 rq_pool;
+			__u8 rqe_ver;
+			__le32 rsvd[4];
+		} p2;
+	};
 };
 
 #define CNDM_CMD_REG_FLG_WRITE  0x00000001
@@ -77,21 +119,11 @@ struct cndm_cmd_reg {
 		__le16 status;
 	};
 	__le32 flags;
-	__le32 dw2;
-	__le32 dw3;
-
-	__le32 dw4;
-	__le32 dw5;
-	__le32 dw6;
+	__le32 rsvd1[5];
 	__le32 reg_addr;
-
 	__le64 write_val;
 	__le64 read_val;
-
-	__le32 dw12;
-	__le32 dw13;
-	__le32 dw14;
-	__le32 dw15;
+	__le32 rsvd2[4];
 };
 
 #define CNDM_CMD_PTP_FLG_SET_TOD    0x00000001
@@ -118,6 +150,29 @@ struct cndm_cmd_ptp {
 	__le64 nom_period;
 
 	__le64 period;
+	__le32 rsvd2[2];
+};
+
+struct cndm_cmd_queue {
+	__le16 rsvd;
+	union {
+		__le16 opcode;
+		__le16 status;
+	};
+	__le32 flags;
+	__le32 port;
+	__le32 qn;
+
+	__le32 qn2;
+	__le32 pd;
+	__le32 size;
+	__le32 dboffs;
+
+	__le64 ptr1;
+	__le64 ptr2;
+
+	__le32 prod;
+	__le32 cons;
 	__le32 dw14;
 	__le32 dw15;
 };

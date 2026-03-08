@@ -9,9 +9,9 @@ Authors:
 */
 
 #include "cndm.h"
-#include "cndm_hw.h"
-#include <linux/module.h>
 #include <linux/delay.h>
+#include <linux/module.h>
+#include <linux/rtc.h>
 #include <linux/version.h>
 
 MODULE_DESCRIPTION("Corundum device driver");
@@ -44,8 +44,12 @@ static int cndm_common_probe(struct cndm_dev *cdev)
 {
 	struct devlink *devlink = priv_to_devlink(cdev);
 	struct device *dev = cdev->dev;
+	struct rtc_time tm;
 	int ret = 0;
 	int k;
+
+	struct cndm_cmd_cfg cmd;
+	struct cndm_cmd_cfg rsp;
 
 	mutex_init(&cdev->mbox_lock);
 
@@ -55,9 +59,125 @@ static int cndm_common_probe(struct cndm_dev *cdev)
 	devlink_register(devlink, dev);
 #endif
 
-	cdev->port_count = ioread32(cdev->hw_addr + 0x0100);
+	// Read config page 0
+	cmd.opcode = CNDM_CMD_OP_CFG;
+	cmd.flags = 0x00000000;
+	cmd.cfg_page = 0;
+
+	cndm_exec_cmd(cdev, &cmd, &rsp);
+
+	cdev->cfg_page_max = rsp.cfg_page_max;
+	cdev->cmd_ver = rsp.cmd_ver;
+
+	dev_info(dev, "Config pages: %d", cdev->cfg_page_max+1);
+	dev_info(dev, "Command version: %d.%d.%d", cdev->cmd_ver >> 20,
+		(cdev->cmd_ver >> 12) & 0xff,
+		cdev->cmd_ver & 0xfff);
+
+	// FW ID
+	cdev->fpga_id = rsp.p0.fpga_id;
+	cdev->fw_id = rsp.p0.fw_id;
+	cdev->fw_ver = rsp.p0.fw_ver;
+	cdev->board_id = rsp.p0.board_id;
+	cdev->board_ver = rsp.p0.board_ver;
+	cdev->build_date = rsp.p0.build_date;
+	cdev->git_hash = rsp.p0.git_hash;
+	cdev->release_info = rsp.p0.release_info;
+
+	rtc_time64_to_tm(cdev->build_date, &tm);
+
+	dev_info(dev, "FPGA ID: 0x%08x", cdev->fpga_id);
+	dev_info(dev, "FW ID: 0x%08x", cdev->fw_id);
+	dev_info(dev, "FW version: %d.%d.%d", cdev->fw_ver >> 20,
+		(cdev->fw_ver >> 12) & 0xff,
+		cdev->fw_ver & 0xfff);
+	dev_info(dev, "Board ID: 0x%08x", cdev->board_id);
+	dev_info(dev, "Board version: %d.%d.%d", cdev->board_ver >> 20,
+		(cdev->board_ver >> 12) & 0xff,
+		cdev->board_ver & 0xfff);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0)
+	snprintf(cdev->build_date_str, sizeof(cdev->build_date_str), "%ptRd %ptRt", &tm, &tm);
+#else
+	snprintf(cdev->build_date_str, sizeof(cdev->build_date_str), "%04d-%02d-%02d %02d:%02d:%02d",
+			tm.tm_year+1900, tm.tm_mon+1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
+#endif
+	dev_info(dev, "Build date: %s UTC (raw: 0x%08x)", cdev->build_date_str, cdev->build_date);
+	dev_info(dev, "Git hash: %08x", cdev->git_hash);
+	dev_info(dev, "Release info: %08x", cdev->release_info);
+
+	// Read config page 1
+	cmd.opcode = CNDM_CMD_OP_CFG;
+	cmd.flags = 0x00000000;
+	cmd.cfg_page = 1;
+
+	cndm_exec_cmd(cdev, &cmd, &rsp);
+
+	// HW config
+	cdev->port_count = rsp.p1.port_count;
+	cdev->sys_clk_per_ns_num = rsp.p1.sys_clk_per_ns_num;
+	cdev->sys_clk_per_ns_den = rsp.p1.sys_clk_per_ns_den;
+	cdev->ptp_clk_per_ns_num = rsp.p1.ptp_clk_per_ns_num;
+	cdev->ptp_clk_per_ns_den = rsp.p1.ptp_clk_per_ns_den;
 
 	dev_info(dev, "Port count: %d", cdev->port_count);
+	if (cdev->sys_clk_per_ns_num != 0) {
+		u64 a, b, c;
+		a = (u64)cdev->sys_clk_per_ns_den * 1000;
+		b = a / cdev->sys_clk_per_ns_num;
+		c = a - (b * cdev->sys_clk_per_ns_num);
+		c = (c * 1000000000) / cdev->sys_clk_per_ns_num;
+		dev_info(dev, "Sys clock freq: %lld.%09lld MHz (raw %d/%d ns)", b, c, cdev->sys_clk_per_ns_num, cdev->sys_clk_per_ns_den);
+	}
+	if (cdev->ptp_clk_per_ns_num != 0) {
+		u64 a, b, c;
+		a = (u64)cdev->ptp_clk_per_ns_den * 1000;
+		b = a / cdev->ptp_clk_per_ns_num;
+		c = a - (b * cdev->ptp_clk_per_ns_num);
+		c = (c * 1000000000) / cdev->ptp_clk_per_ns_num;
+		dev_info(dev, "PTP clock freq: %lld.%09lld MHz (raw %d/%d ns)", b, c, cdev->ptp_clk_per_ns_num, cdev->ptp_clk_per_ns_den);
+	}
+
+	// Read config page 2
+	cmd.opcode = CNDM_CMD_OP_CFG;
+	cmd.flags = 0x00000000;
+	cmd.cfg_page = 2;
+
+	cndm_exec_cmd(cdev, &cmd, &rsp);
+
+	// Resources
+	cdev->log_max_eq = rsp.p2.log_max_eq;
+	cdev->log_max_eq_sz = rsp.p2.log_max_eq_sz;
+	cdev->eq_pool = rsp.p2.eq_pool;
+	cdev->eqe_ver = rsp.p2.eqe_ver;
+	cdev->log_max_cq = rsp.p2.log_max_cq;
+	cdev->log_max_cq_sz = rsp.p2.log_max_cq_sz;
+	cdev->cq_pool = rsp.p2.cq_pool;
+	cdev->cqe_ver = rsp.p2.cqe_ver;
+	cdev->log_max_sq = rsp.p2.log_max_sq;
+	cdev->log_max_sq_sz = rsp.p2.log_max_sq_sz;
+	cdev->sq_pool = rsp.p2.sq_pool;
+	cdev->sqe_ver = rsp.p2.sqe_ver;
+	cdev->log_max_rq = rsp.p2.log_max_rq;
+	cdev->log_max_rq_sz = rsp.p2.log_max_rq_sz;
+	cdev->rq_pool = rsp.p2.rq_pool;
+	cdev->rqe_ver = rsp.p2.rqe_ver;
+
+	dev_info(dev, "Max EQ count: %d (log %d)", 1 << cdev->log_max_eq, cdev->log_max_eq);
+	dev_info(dev, "Max EQ size: %d (log %d)", 1 << cdev->log_max_eq_sz, cdev->log_max_eq_sz);
+	dev_info(dev, "EQ pool: %d", cdev->eq_pool);
+	dev_info(dev, "EQE version: %d", cdev->eqe_ver);
+	dev_info(dev, "Max CQ count: %d (log %d)", 1 << cdev->log_max_cq, cdev->log_max_cq);
+	dev_info(dev, "Max CQ size: %d (log %d)", 1 << cdev->log_max_cq_sz, cdev->log_max_cq_sz);
+	dev_info(dev, "CQ pool: %d", cdev->cq_pool);
+	dev_info(dev, "CQE version: %d", cdev->cqe_ver);
+	dev_info(dev, "Max SQ count: %d (log %d)", 1 << cdev->log_max_sq, cdev->log_max_sq);
+	dev_info(dev, "Max SQ size: %d (log %d)", 1 << cdev->log_max_sq_sz, cdev->log_max_sq_sz);
+	dev_info(dev, "SQ pool: %d", cdev->sq_pool);
+	dev_info(dev, "SQE version: %d", cdev->sqe_ver);
+	dev_info(dev, "Max RQ count: %d (log %d)", 1 << cdev->log_max_rq, cdev->log_max_rq);
+	dev_info(dev, "Max RQ size: %d (log %d)", 1 << cdev->log_max_rq_sz, cdev->log_max_rq_sz);
+	dev_info(dev, "RQ pool: %d", cdev->rq_pool);
+	dev_info(dev, "RQE version: %d", cdev->rqe_ver);
 
 	if (cdev->port_count > ARRAY_SIZE(cdev->ndev))
 		cdev->port_count = ARRAY_SIZE(cdev->ndev);
