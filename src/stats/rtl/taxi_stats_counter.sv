@@ -64,9 +64,9 @@ logic stage_active;
 logic [PIPELINE-1:0] op_axil_read_pipe_reg = 0, op_axil_read_pipe_next;
 logic [PIPELINE-1:0] op_acc_pipe_reg = 0, op_acc_pipe_next;
 
-logic [STAT_ID_W-1:0] mem_addr_pipeline_reg[PIPELINE], mem_addr_pipeline_next[PIPELINE];
-logic [WORD_SELECT_W-1:0] axil_shift_pipeline_reg[PIPELINE], axil_shift_pipeline_next[PIPELINE];
-logic [STAT_INC_W-1:0] stat_inc_pipeline_reg[PIPELINE], stat_inc_pipeline_next[PIPELINE];
+logic [STAT_ID_W-1:0] mem_addr_pipeline_reg[PIPELINE] = '{default: '0}, mem_addr_pipeline_next[PIPELINE];
+logic [WORD_SELECT_W-1:0] axil_shift_pipeline_reg[PIPELINE] = '{default: '0}, axil_shift_pipeline_next[PIPELINE];
+logic [STAT_INC_W-1:0] stat_inc_pipeline_reg[PIPELINE] = '{default: '0}, stat_inc_pipeline_next[PIPELINE];
 
 logic s_axis_stat_tready_reg = 1'b0, s_axis_stat_tready_next;
 
@@ -78,14 +78,14 @@ logic [AXIL_DATA_W-1:0] s_axil_rdata_reg = 0, s_axil_rdata_next;
 logic s_axil_rvalid_reg = 0, s_axil_rvalid_next;
 
 (* ramstyle = "no_rw_check" *)
-logic [STAT_COUNT_W-1:0] mem[2**STAT_ID_W];
+logic [STAT_COUNT_W-1:0] mem[2**STAT_ID_W] = '{default: '0};
 
 logic [STAT_ID_W-1:0] mem_rd_addr;
 logic [STAT_ID_W-1:0] mem_wr_addr;
 logic [STAT_COUNT_W-1:0] mem_wr_data;
 logic mem_wr_en;
 logic [STAT_COUNT_W-1:0] mem_read_data_reg = 0;
-logic [STAT_COUNT_W-1:0] mem_read_data_pipeline_reg[PIPELINE-1:1];
+logic [STAT_COUNT_W-1:0] mem_read_data_pipeline_reg[PIPELINE-1:1] = '{default: '0};
 
 assign s_axis_stat.tready = s_axis_stat_tready_reg;
 
@@ -101,21 +101,6 @@ assign s_axil_rd.rvalid = s_axil_rvalid_reg;
 
 wire [STAT_ID_W-1:0] s_axil_araddr_id = STAT_ID_W'(s_axil_rd.araddr >> ID_SHIFT);
 wire [WORD_SELECT_W-1:0] s_axil_araddr_shift = WORD_SELECT_W'(s_axil_rd.araddr >> WORD_SELECT_SHIFT);
-
-initial begin
-    // break up loop to work around iteration termination
-    for (integer i = 0; i < 2**STAT_ID_W; i = i + 2**(STAT_ID_W/2)) begin
-        for (integer j = i; j < i + 2**(STAT_ID_W/2); j = j + 1) begin
-            mem[j] = 0;
-        end
-    end
-
-    for (integer i = 0; i < PIPELINE; i = i + 1) begin
-        mem_addr_pipeline_reg[i] = 0;
-        axil_shift_pipeline_reg[i] = 0;
-        stat_inc_pipeline_reg[i] = 0;
-    end
-end
 
 always_comb begin
     init_next = init_reg;

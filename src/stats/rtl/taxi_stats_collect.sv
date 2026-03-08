@@ -122,7 +122,7 @@ wire [ACC_W-1:0] acc_int[CNT];
 logic [CNT-1:0] acc_clear;
 
 (* ram_style = "distributed", ramstyle = "no_rw_check, mlab" *)
-logic [STAT_INC_W-1:0] mem_reg[CNT];
+logic [STAT_INC_W-1:0] mem_reg[CNT] = '{default: '0};
 
 logic [STAT_INC_W-1:0] mem_rd_data_reg = '0;
 
