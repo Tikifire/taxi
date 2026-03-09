@@ -35,6 +35,8 @@ module cndm_micro_core #(
 
     // Structural configuration
     parameter PORTS = 2,
+    parameter SYS_CLK_PER_NS_NUM = 4,
+    parameter SYS_CLK_PER_NS_DEN = 1,
 
     // Queue configuration
     parameter WQN_W = 5,
@@ -44,7 +46,7 @@ module cndm_micro_core #(
     parameter logic PTP_TS_EN = 1'b1,
     parameter logic PTP_TS_FMT_TOD = 1'b0,
     parameter PTP_CLK_PER_NS_NUM = 512,
-    parameter PTP_CLK_PER_NS_DENOM = 165
+    parameter PTP_CLK_PER_NS_DEN = 165
 )
 (
     input  wire logic              clk,
@@ -324,8 +326,8 @@ cndm_micro_dp_mgr #(
 
     // Structural configuration
     .PORTS(PORTS),
-    .SYS_CLK_PER_NS_NUM(4),
-    .SYS_CLK_PER_NS_DENOM(1),
+    .SYS_CLK_PER_NS_NUM(SYS_CLK_PER_NS_NUM),
+    .SYS_CLK_PER_NS_DEN(SYS_CLK_PER_NS_DEN),
 
     // Queue configuration
     .WQN_W(WQN_W),
@@ -334,7 +336,7 @@ cndm_micro_dp_mgr #(
     // PTP configuration
     .PTP_EN(PTP_TS_EN),
     .PTP_CLK_PER_NS_NUM(PTP_CLK_PER_NS_NUM),
-    .PTP_CLK_PER_NS_DENOM(PTP_CLK_PER_NS_DENOM),
+    .PTP_CLK_PER_NS_DEN(PTP_CLK_PER_NS_DEN),
 
     // Addressing
     .PTP_BASE_ADDR_DP(0),
@@ -390,7 +392,7 @@ if (PTP_TS_EN) begin : ptp
 
     taxi_ptp_td_phc_apb #(
         .PTP_CLK_PER_NS_NUM(PTP_CLK_PER_NS_NUM),
-        .PTP_CLK_PER_NS_DENOM(PTP_CLK_PER_NS_DENOM)
+        .PTP_CLK_PER_NS_DENOM(PTP_CLK_PER_NS_DEN)
     )
     ptp_inst (
         .clk(clk),

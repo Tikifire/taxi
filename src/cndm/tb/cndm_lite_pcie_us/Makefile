@@ -38,12 +38,18 @@ export PARAM_FAMILY := "\"virtexuplus\""
 
 # Structural configuration
 export PARAM_PORTS := 2
+export PARAM_SYS_CLK_PER_NS_NUM := 4
+export PARAM_SYS_CLK_PER_NS_DEN := 1
+
+# Queue configuration
+export PARAM_WQN_W := 5
+export PARAM_CQN_W := $(PARAM_WQN_W)
 
 # PTP configuration
 export PARAM_PTP_TS_EN := 1
 export PARAM_PTP_TS_FMT_TOD := 0
 export PARAM_PTP_CLK_PER_NS_NUM := 512
-export PARAM_PTP_CLK_PER_NS_DENOM := 165
+export PARAM_PTP_CLK_PER_NS_DEN := 165
 
 # PCIe interface configuration
 export PARAM_AXIS_PCIE_DATA_W := 512

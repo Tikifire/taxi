@@ -482,12 +482,18 @@ def test_cndm_lite_pcie_us(request, pcie_data_w, mac_data_w):
 
     # Structural configuration
     parameters['PORTS'] = 2
+    parameters['SYS_CLK_PER_NS_NUM'] = 4
+    parameters['SYS_CLK_PER_NS_DEN'] = 1
+
+    # Queue configuration
+    parameters['WQN_W'] = 5
+    parameters['CQN_W'] = parameters['WQN_W']
 
     # PTP configuration
     parameters['PTP_TS_EN'] = 1
     parameters['PTP_TS_FMT_TOD'] = 0
     parameters['PTP_CLK_PER_NS_NUM'] = 512
-    parameters['PTP_CLK_PER_NS_DENOM'] = 165
+    parameters['PTP_CLK_PER_NS_DEN'] = 165
 
     # PCIe interface configuration
     parameters['AXIS_PCIE_DATA_W'] = pcie_data_w

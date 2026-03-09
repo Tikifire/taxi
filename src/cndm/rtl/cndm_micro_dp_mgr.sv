@@ -30,7 +30,7 @@ module cndm_micro_dp_mgr #
     // Structural configuration
     parameter PORTS = 2,
     parameter SYS_CLK_PER_NS_NUM = 4,
-    parameter SYS_CLK_PER_NS_DENOM = 1,
+    parameter SYS_CLK_PER_NS_DEN = 1,
 
     // Queue configuration
     parameter WQN_W = 5,
@@ -39,7 +39,7 @@ module cndm_micro_dp_mgr #
     // PTP configuration
     parameter logic PTP_EN = 1'b1,
     parameter PTP_CLK_PER_NS_NUM = 512,
-    parameter PTP_CLK_PER_NS_DENOM = 165,
+    parameter PTP_CLK_PER_NS_DEN = 165,
 
     // Addressing
     parameter PTP_BASE_ADDR_DP = 0,
@@ -203,11 +203,11 @@ logic [31:0] id_rom[(ID_PAGES+1)*8] = '{
     0, // 19
     { // 20
         16'(SYS_CLK_PER_NS_NUM), // [31:16]
-        16'(SYS_CLK_PER_NS_DENOM) // [15:0]
+        16'(SYS_CLK_PER_NS_DEN) // [15:0]
     },
     { // 21
         16'(PTP_CLK_PER_NS_NUM), // [31:16]
-        16'(PTP_CLK_PER_NS_DENOM) // [15:0]
+        16'(PTP_CLK_PER_NS_DEN) // [15:0]
     },
     0, // 22
     0, // 23

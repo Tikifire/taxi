@@ -35,15 +35,18 @@ module cndm_lite_pcie_us #(
 
     // Structural configuration
     parameter PORTS = 2,
+    parameter SYS_CLK_PER_NS_NUM = 4,
+    parameter SYS_CLK_PER_NS_DEN = 1,
 
     // Queue configuration
-    parameter CQN_W = 5,
+    parameter WQN_W = 5,
+    parameter CQN_W = WQN_W,
 
     // PTP configuration
     parameter logic PTP_TS_EN = 1'b1,
     parameter logic PTP_TS_FMT_TOD = 1'b0,
     parameter PTP_CLK_PER_NS_NUM = 512,
-    parameter PTP_CLK_PER_NS_DENOM = 165,
+    parameter PTP_CLK_PER_NS_DEN = 165,
 
     // PCIe interface configuration
     parameter RQ_SEQ_NUM_W = 6,
@@ -512,6 +515,8 @@ cndm_lite_core #(
 
     // Structural configuration
     .PORTS(PORTS),
+    .SYS_CLK_PER_NS_NUM(SYS_CLK_PER_NS_NUM),
+    .SYS_CLK_PER_NS_DEN(SYS_CLK_PER_NS_DEN),
 
     // Queue configuration
     .CQN_W(CQN_W),
@@ -520,7 +525,7 @@ cndm_lite_core #(
     .PTP_TS_EN(PTP_TS_EN),
     .PTP_TS_FMT_TOD(PTP_TS_FMT_TOD),
     .PTP_CLK_PER_NS_NUM(PTP_CLK_PER_NS_NUM),
-    .PTP_CLK_PER_NS_DENOM(PTP_CLK_PER_NS_DENOM)
+    .PTP_CLK_PER_NS_DEN(PTP_CLK_PER_NS_DEN)
 )
 core_inst (
     .clk(pcie_clk),
